@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { EMPTY_MODULE, lintFixture } from "./oxlint.js";
 
-const PLUGIN = join(import.meta.dir, "../dist/index.js");
-const OXLINT = join(import.meta.dir, "../node_modules/.bin/oxlint");
 const RULES = ["role-suffix", "feature-prefix", "location", "reserved-suffixes", "no-loose-files"].map(
   (rule) => `react-router-${rule}`,
 );
@@ -19,48 +15,17 @@ type Project = {
   reactRouter?: boolean;
 };
 
-type Diagnostic = { code?: string; message: string };
-
 const ROUTES_IMPORT = 'import { index, layout, prefix, route } from "@react-router/dev/routes";\n';
 
-/** Lints a throwaway project with every rule on; returns `rule: message` lines, sorted. */
+/** Lints `apps/web` with every react-router rule on; returns `rule: message` lines without the `react-router-` prefix. */
 function lint({ settings, routes, files = [], reactRouter = true }: Project): string[] {
-  const dir = mkdtempSync(join(tmpdir(), "structure-"));
-  const write = (path: string, text = "export {};\n") => {
-    mkdirSync(dirname(join(dir, path)), { recursive: true });
-    writeFileSync(join(dir, path), text);
-  };
-  try {
-    write(
-      ".oxlintrc.json",
-      JSON.stringify({
-        jsPlugins: [PLUGIN],
-        settings: settings ? { structure: { "react-router": settings } } : {},
-        rules: Object.fromEntries(RULES.map((rule) => [`structure/${rule}`, "error"])),
-      }),
-    );
-    if (reactRouter) write("apps/web/react-router.config.ts", 'export default { appDirectory: "src" };\n');
-    if (routes !== undefined) write("apps/web/src/routes.ts", routes);
-    for (const file of files) write(`apps/web/src/${file}`);
-
-    const result = Bun.spawnSync({ cmd: [OXLINT, "--format", "json", "."], cwd: dir });
-    const output = result.stdout.toString() + result.stderr.toString();
-    let diagnostics: Diagnostic[];
-    try {
-      diagnostics = (JSON.parse(result.stdout.toString()) as { diagnostics: Diagnostic[] }).diagnostics;
-    } catch {
-      throw new Error(output);
-    }
-    const crash = diagnostics.find((diagnostic) => diagnostic.message.startsWith("Error running JS plugin"));
-    if (crash) throw new Error(crash.message);
-    return diagnostics
-      .flatMap(({ code, message }) =>
-        code?.startsWith("structure(react-router-") ? [`${code.slice("structure(react-router-".length, -1)}: ${message}`] : [],
-      )
-      .sort();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const tree: Record<string, string> = {};
+  if (reactRouter) tree["apps/web/react-router.config.ts"] = 'export default { appDirectory: "src" };\n';
+  if (routes !== undefined) tree["apps/web/src/routes.ts"] = routes;
+  for (const file of files) tree[`apps/web/src/${file}`] = EMPTY_MODULE;
+  return lintFixture({ files: tree, structure: settings ? { "react-router": settings } : undefined, rules: RULES }).map(
+    (line) => line.replace(/^react-router-/, ""),
+  );
 }
 
 describe("mode pages (default)", () => {
