@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EMPTY_MODULE, lintFixture } from "./oxlint.js";
 
-const RULES = ["role-suffix", "feature-prefix", "location", "reserved-suffixes", "no-loose-files"].map(
+const RULES = ["role-suffix", "feature-prefix", "location", "reserved-suffixes", "no-loose-files", "file-case"].map(
   (rule) => `react-router-${rule}`,
 );
 
@@ -196,6 +196,55 @@ describe("app detection", () => {
     expect(
       lint({ reactRouter: false, files: ["features/design-system/design-system-card.tsx"] }),
     ).toEqual([]);
+  });
+});
+
+describe("file case", () => {
+  test("asks for kebab-case anywhere under features/: route modules, tests and every subfolder", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}export default [route("g", "features/game/pages/game-Room-page.tsx")];`,
+        files: [
+          "features/game/pages/game-Room-page.tsx",
+          "features/game/components/game-card.tsx",
+          "features/game/components/GameCard.tsx",
+          "features/game/components/GameCard.test.tsx",
+          "features/game/components/game_card.tsx",
+          "features/game/hooks/useGame.ts",
+          "features/game/lib/HTMLParser.ts",
+        ],
+      }),
+    ).toEqual(
+      [
+        "file-case: features/game/pages/game-Room-page.tsx: the name is not kebab-case → rename it game-room-page.tsx",
+        "file-case: features/game/components/GameCard.tsx: the name is not kebab-case → rename it game-card.tsx",
+        "file-case: features/game/components/GameCard.test.tsx: the name is not kebab-case → rename it game-card.test.tsx",
+        "file-case: features/game/components/game_card.tsx: the name is not kebab-case → rename it game-card.tsx",
+        "file-case: features/game/hooks/useGame.ts: the name is not kebab-case → rename it use-game.ts",
+        "file-case: features/game/lib/HTMLParser.ts: the name is not kebab-case → rename it html-parser.ts",
+      ].sort(),
+    );
+  });
+
+  test("names the rule when no kebab-case name can be derived", () => {
+    expect(lint({ routes: ROUTES_IMPORT, files: ["features/game/lib/$.ts"] })).toEqual([
+      "file-case: features/game/lib/$.ts: the name is not kebab-case → rename it with lowercase words joined by -",
+    ]);
+  });
+
+  test("leaves alone what is outside features/ and what is not a React Router app", () => {
+    expect(lint({ routes: ROUTES_IMPORT, files: ["components/GameCard.tsx"] })).toEqual([]);
+    expect(lint({ reactRouter: false, files: ["features/game/GameCard.tsx"] })).toEqual([]);
+  });
+
+  test("follows featuresDir", () => {
+    expect(
+      lint({
+        settings: { featuresDir: "modules" },
+        routes: ROUTES_IMPORT,
+        files: ["modules/app/ui/AppButton.tsx", "features/app/ui/AppButton.tsx"],
+      }),
+    ).toEqual(["file-case: modules/app/ui/AppButton.tsx: the name is not kebab-case → rename it app-button.tsx"]);
   });
 });
 

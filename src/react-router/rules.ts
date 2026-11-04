@@ -225,10 +225,51 @@ const noLooseFiles: Rule = {
     }),
 };
 
+const KEBAB_NAME = /^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)*$/;
+
+/** `GameCard.test.tsx` → `game-card.test.tsx`; null when a part has nothing usable left (`$.ts`). */
+function kebabName(name: string): string | null {
+  const parts = name.split(".").map((part) =>
+    part
+      .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
+      .replace(/[^A-Za-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase(),
+  );
+  return parts.every((part) => part !== "") ? parts.join(".") : null;
+}
+
+const fileCase: Rule = {
+  meta: {
+    type: "problem",
+    docs: { description: "Every file under features/ is named in kebab-case: game-card.tsx." },
+    schema: [],
+  },
+  create(context) {
+    const settings = readSettings(context.settings);
+    const app = findRouterApp(context.filename);
+    if (!app) return {};
+    const file = appPath(app, context.filename);
+    const name = basename(file);
+    if (!file.startsWith(`${settings.featuresDir}/`) || KEBAB_NAME.test(name)) return {};
+    const fix = kebabName(name);
+    return {
+      Program(node) {
+        context.report({
+          node,
+          message: `${file}: the name is not kebab-case → rename it ${fix ?? "with lowercase words joined by -"}`,
+        });
+      },
+    };
+  },
+};
+
 export const reactRouterRules: Record<string, Rule> = {
   "react-router-role-suffix": roleSuffix,
   "react-router-feature-prefix": featurePrefix,
   "react-router-location": location,
   "react-router-reserved-suffixes": reservedSuffixes,
   "react-router-no-loose-files": noLooseFiles,
+  "react-router-file-case": fileCase,
 };
