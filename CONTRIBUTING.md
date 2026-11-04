@@ -10,6 +10,14 @@ bun run typecheck && bun run lint && bun run test
 `bun run test` builds `dist/` first: the tests lint fixture projects with the real oxlint CLI and the
 built plugin, so a passing test means the rule works in oxlint, not only in isolation.
 
+Supported floors are oxlint 1.76 and Node 20 (`peerDependencies`, `engines`). Check a change against
+them before raising either:
+
+```bash
+OXLINT_BIN=/path/to/oxlint-1.76/bin/oxlint bun test   # another oxlint
+PATH=/path/to/node-20/bin:$PATH bun test               # oxlint runs JS plugins on that Node
+```
+
 ## Changing a rule or adding a stack
 
 A rule here is the convention itself, so it must earn its place on real code:

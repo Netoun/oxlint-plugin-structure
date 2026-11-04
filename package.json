@@ -2,7 +2,16 @@
   "name": "@netoun/oxlint-plugin-structure",
   "version": "0.1.0",
   "description": "oxlint / ESLint rules that keep a project's folders and file names on its stack's conventions: React Router, Elysia, NestJS.",
-  "keywords": ["oxlint", "eslint", "eslintplugin", "oxlint-plugin", "react-router", "elysia", "nestjs", "project-structure"],
+  "keywords": [
+    "oxlint",
+    "eslint",
+    "eslintplugin",
+    "oxlint-plugin",
+    "react-router",
+    "elysia",
+    "nestjs",
+    "project-structure"
+  ],
   "license": "MIT",
   "author": "Netoun",
   "type": "module",
@@ -12,9 +21,19 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=20"
+  },
+  "peerDependencies": {
+    "oxlint": ">=1.76.0"
+  },
+  "peerDependenciesMeta": {
+    "oxlint": {
+      "optional": true
+    }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
