@@ -104,7 +104,7 @@ function rulesFor(stack: Stack): Record<string, Rule> {
   const filePrefix = moduleFileRule(stack, "Every other file of a module starts with the module's name.", (file) => {
     const module = file.folders[0];
     if (module === undefined || roleOf(file) !== undefined || isFreeName(file) || isPrefixed(file)) return null;
-    return `start the name with its module (${module}.… or ${module}-…)`;
+    return `the name does not start with its module → rename it ${module}.… or ${module}-…`;
   });
 
   const moduleEntry = moduleFileRule(
@@ -157,7 +157,7 @@ const elysiaContractLocation = moduleFileRule(
   (file) => {
     const [module, ...rest] = file.folders;
     if (module === undefined || rest.length > 0 || !file.name.endsWith(".contract.ts")) return null;
-    return `contracts live in ${basename(file.settings.modulesDir)}/${module}/${file.settings.contractsFolder}/`;
+    return `a module's contract sits in its root → move it to ${basename(file.settings.modulesDir)}/${module}/${file.settings.contractsFolder}/`;
   },
 );
 

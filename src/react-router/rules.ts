@@ -159,7 +159,7 @@ const featurePrefix: Rule = {
       const features = featureNames(dirname(file), settings);
       const name = basename(file);
       if (features.length === 0 || features.some((feature) => name.startsWith(`${feature}-`))) return [];
-      return [`start the name with its feature (${features.at(-1)}-…)`];
+      return [`the name does not start with its feature → rename it ${features.at(-1)}-…`];
     }),
 };
 
@@ -175,7 +175,7 @@ const location: Rule = {
       ({ file }, settings) =>
         file.startsWith(`${settings.featuresDir}/`) && isInRouteFolder(dirname(file), settings)
           ? []
-          : [`route modules live in ${routeHome(settings)}`],
+          : [`route modules live in ${routeHome(settings)} → move it there and update routes.ts`],
       (node, routesFile) =>
         context.report({
           node,
@@ -207,7 +207,7 @@ const noLooseFiles: Rule = {
   create: (context) =>
     featureFileRule(context, (file, routes, settings, app) => {
       if (routes === null) {
-        return `${app.configName} points at ${app.appDirectory}/, which has no routes.ts`;
+        return `${app.configName} points at ${app.appDirectory}/, which has no routes.ts → add ${app.appDirectory}/routes.ts, or fix appDirectory`;
       }
       if (reservedSuffix(settings).test(file)) return null;
       const dir = dirname(file);

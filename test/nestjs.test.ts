@@ -66,7 +66,7 @@ describe("nestjs", () => {
       [
         "role-prefix: modules/storage/media-storage.service.ts: service files start with their module (storage.service.ts, storage-….service.ts) → rename it, or move it to the module it belongs to",
         "role-prefix: modules/billing/contracts/offer.contract.ts: contract files start with their module (billing.contract.ts, billing-….contract.ts) → rename it, or move it to the module it belongs to",
-        "file-prefix: modules/email/welcome-email.spec.ts: start the name with its module (email.… or email-…)",
+        "file-prefix: modules/email/welcome-email.spec.ts: the name does not start with its module → rename it email.… or email-…",
         "module-entry: modules/landing-server/landing-server.guard.ts: modules/landing-server/ has no landing-server.module.ts → add it, or move this file out of modules/",
       ].sort(),
     );
@@ -82,6 +82,6 @@ describe("nestjs", () => {
         settings: { freeNameFolders: [], roles: ["module", "service"] },
         files: ["billing/billing.module.ts", "billing/entities/stripe-event.entity.ts"],
       }),
-    ).toEqual(["file-prefix: modules/billing/entities/stripe-event.entity.ts: start the name with its module (billing.… or billing-…)"]);
+    ).toEqual(["file-prefix: modules/billing/entities/stripe-event.entity.ts: the name does not start with its module → rename it billing.… or billing-…"]);
   });
 });

@@ -77,11 +77,11 @@ describe("mode pages (default)", () => {
       }),
     ).toEqual(
       [
-        "location: features/game/game-room-layout.tsx: route modules live in features/<feature>/pages/",
-        "location: routes/legacy-page.tsx: route modules live in features/<feature>/pages/",
+        "location: features/game/game-room-layout.tsx: route modules live in features/<feature>/pages/ → move it there and update routes.ts",
+        "location: routes/legacy-page.tsx: route modules live in features/<feature>/pages/ → move it there and update routes.ts",
         "role-suffix: features/shell/pages/shell-page.tsx: has child routes, so it is a layout → name it *-layout.tsx",
         "role-suffix: features/auth/pages/login.tsx: leaf route → name it *-page.tsx or *-redirect.tsx",
-        "feature-prefix: features/auth/pages/login.tsx: start the name with its feature (auth-…)",
+        "feature-prefix: features/auth/pages/login.tsx: the name does not start with its feature → rename it auth-…",
         "no-loose-files: features/game/pages/game-card.tsx: only route modules live in features/<feature>/pages/ → move it to a subfolder (components/, hooks/, lib/…)",
         "no-loose-files: features/game/types.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
         "no-loose-files: features/helpers.ts: no loose file directly in features/ → move it into a feature",
@@ -131,7 +131,7 @@ describe("mode flat", () => {
         ],
       }),
     ).toEqual([
-      "location: features/catalog/components/catalog-card-page.tsx: route modules live in features/<feature>/",
+      "location: features/catalog/components/catalog-card-page.tsx: route modules live in features/<feature>/ → move it there and update routes.ts",
       "no-loose-files: features/catalog/catalog-filters.tsx: only route modules live in features/<feature>/ → move it to a subfolder (components/, hooks/, lib/…)",
     ]);
   });
@@ -154,7 +154,7 @@ describe("routes.ts forms", () => {
         ],
       }),
     ).toEqual([
-      "feature-prefix: features/home/pages/home.tsx: start the name with its feature (home-…)",
+      "feature-prefix: features/home/pages/home.tsx: the name does not start with its feature → rename it home-…",
       "role-suffix: features/home/pages/home.tsx: leaf route → name it *-page.tsx or *-redirect.tsx",
     ]);
   });
@@ -188,7 +188,7 @@ describe("routes.ts forms", () => {
 describe("app detection", () => {
   test("reports a React Router app whose routes file cannot be found", () => {
     expect(lint({ files: ["features/home/pages/home-page.tsx"] })).toEqual([
-      "no-loose-files: features/home/pages/home-page.tsx: react-router.config.ts points at src/, which has no routes.ts",
+      "no-loose-files: features/home/pages/home-page.tsx: react-router.config.ts points at src/, which has no routes.ts → add src/routes.ts, or fix appDirectory",
     ]);
   });
 

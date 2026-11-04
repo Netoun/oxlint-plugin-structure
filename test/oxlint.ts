@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 const PLUGIN = join(import.meta.dir, "../dist/index.js");
-const OXLINT = join(import.meta.dir, "../node_modules/.bin/oxlint");
+/** The oxlint binary; `OXLINT_BIN` runs the suite against another version. */
+const OXLINT = process.env.OXLINT_BIN ?? join(import.meta.dir, "../node_modules/.bin/oxlint");
 
 export const EMPTY_MODULE = "export {};\n";
 

@@ -63,10 +63,10 @@ describe("elysia", () => {
     ).toEqual(
       [
         "role-prefix: modules/admin/batch-recipes.service.ts: service files start with their module (admin.service.ts, admin-….service.ts) → rename it, or move it to the module it belongs to",
-        "contract-location: modules/household/household.contract.ts: contracts live in modules/household/contracts/",
+        "contract-location: modules/household/household.contract.ts: a module's contract sits in its root → move it to modules/household/contracts/",
         "module-entry: modules/realtime/notify-household.ts: modules/realtime/ has no realtime.module.ts → add it, or move this file out of modules/",
-        "file-prefix: modules/realtime/notify-household.ts: start the name with its module (realtime.… or realtime-…)",
-        "file-prefix: modules/teams/normalize-team-name.ts: start the name with its module (teams.… or teams-…)",
+        "file-prefix: modules/realtime/notify-household.ts: the name does not start with its module → rename it realtime.… or realtime-…",
+        "file-prefix: modules/teams/normalize-team-name.ts: the name does not start with its module → rename it teams.… or teams-…",
         "module-entry: modules/helpers.ts: no loose file in modules/ → put it in a module folder",
       ].sort(),
     );
@@ -88,7 +88,7 @@ describe("elysia", () => {
         ],
       }),
     ).toEqual([
-      "file-prefix: modules/users/accounts.service.ts: start the name with its module (users.… or users-…)",
+      "file-prefix: modules/users/accounts.service.ts: the name does not start with its module → rename it users.… or users-…",
       "role-prefix: modules/users/accounts.repository.ts: repository files start with their module (users.repository.ts, users-….repository.ts) → rename it, or move it to the module it belongs to",
     ]);
   });
@@ -123,7 +123,7 @@ describe("presets combine", () => {
 
     expect(lintFixture({ files, rules })).toEqual([
       "elysia-role-prefix: modules/cart/checkout.service.ts: service files start with their module (cart.service.ts, cart-….service.ts) → rename it, or move it to the module it belongs to",
-      "react-router-feature-prefix: features/home/pages/home.tsx: start the name with its feature (home-…)",
+      "react-router-feature-prefix: features/home/pages/home.tsx: the name does not start with its feature → rename it home-…",
       "react-router-role-suffix: features/home/pages/home.tsx: leaf route → name it *-page.tsx or *-redirect.tsx",
     ]);
   });
