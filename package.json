@@ -1,0 +1,33 @@
+{
+  "name": "@netoun/eslint-plugin-structure",
+  "version": "0.1.0",
+  "description": "oxlint / ESLint rules that keep a project's folders and file names on its stack's conventions: React Router, Elysia, NestJS.",
+  "keywords": ["oxlint", "eslint", "eslintplugin", "oxlint-plugin", "react-router", "elysia", "nestjs", "project-structure"],
+  "license": "MIT",
+  "author": "Netoun",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "bun run build && bun test",
+    "lint": "oxlint src test",
+    "prepublishOnly": "bun run typecheck && bun run test"
+  },
+  "packageManager": "bun@1.4.2",
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/node": "^26.6.6",
+    "oxlint": "^1.91.0",
+    "typescript": "^7.0.2"
+  }
+}
