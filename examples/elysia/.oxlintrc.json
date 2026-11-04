@@ -1,0 +1,8 @@
+{
+  "jsPlugins": ["@netoun/oxlint-plugin-structure"],
+  "rules": {
+    "structure/elysia-role-prefix": "error",
+    "structure/elysia-module-entry": "error",
+    "structure/elysia-contract-location": "error"
+  }
+}

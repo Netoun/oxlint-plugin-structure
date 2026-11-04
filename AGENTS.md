@@ -29,7 +29,10 @@ agent reads, so the rules are the documentation of the convention.
 3. **Green.** Implement in `src/<stack>/` (or `src/modules/` for module-based APIs), register the
    rules in `src/index.ts`, typed with the minimal API in `src/eslint.ts`: narrow AST nodes with
    guards, never `any`.
-4. **Re-measure** on the same repos, then update the README tables (rules, settings, defaults).
+4. **Re-measure** on the same repos, then update the README tables (rules, settings, defaults) and
+   `examples/<stack>/`, which must keep passing its own `.oxlintrc.json`. A new stack adds its tree,
+   its copyable config, and one `CASES` entry in `test/examples.test.ts` that breaks a file and pins
+   the message the README shows.
 
 Done when `bun run typecheck && bun run lint && bun run test` pass and the re-measure matches the
 dry-run.

@@ -1,0 +1,7 @@
+{
+  "jsPlugins": ["@netoun/oxlint-plugin-structure"],
+  "rules": {
+    "structure/nestjs-role-prefix": "error",
+    "structure/nestjs-module-entry": "error"
+  }
+}

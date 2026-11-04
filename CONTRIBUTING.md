@@ -24,7 +24,7 @@ A rule here is the convention itself, so it must earn its place on real code:
 
 1. Measure the check on existing repos before writing it, and read what it flags.
 2. Write the failing cases in `test/<stack>.test.ts`, then the rule.
-3. Measure again and update the README.
+3. Measure again and update the README and `examples/`.
 
 The full checklist, and the invariants every rule keeps, are in [`AGENTS.md`](./AGENTS.md).
 

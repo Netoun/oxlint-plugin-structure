@@ -1,0 +1,15 @@
+{
+  "jsPlugins": ["@netoun/oxlint-plugin-structure"],
+  "settings": {
+    "structure": {
+      "react-router": { "mode": "pages" }
+    }
+  },
+  "rules": {
+    "structure/react-router-role-suffix": "error",
+    "structure/react-router-feature-prefix": "error",
+    "structure/react-router-location": "error",
+    "structure/react-router-reserved-suffixes": "error",
+    "structure/react-router-no-loose-files": "error"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "example-elysia-api",
+  "private": true,
+  "dependencies": { "elysia": "^1.4.0" }
+}
