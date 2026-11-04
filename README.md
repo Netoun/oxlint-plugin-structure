@@ -1,30 +1,29 @@
-# @netoun/eslint-plugin-structure
+# @netoun/oxlint-plugin-structure
 
 Lint rules that keep a project's folders and file names on its stack's conventions, so every
 contributor, human or agent, puts a file in the same place. The error message names the fix.
 
-Works in **oxlint** (JS plugins) and **ESLint** (same rule API).
+An **oxlint** JS plugin. oxlint JS plugins use the ESLint rule API, so it also runs under ESLint.
 
-| Stack        | Rules              | Status |
-| ------------ | ------------------ | ------ |
-| React Router | `react-router-*`   | ✅     |
-| Elysia       | `elysia-*`         | next   |
-| NestJS       | `nestjs-*`         | next   |
+| Stack        | Rules            | An app is this stack's when                       |
+| ------------ | ---------------- | ------------------------------------------------- |
+| React Router | `react-router-*` | a `react-router.config.*` sits up to its package root |
+| Elysia       | `elysia-*`       | its nearest `package.json` depends on `elysia`    |
+| NestJS       | `nestjs-*`       | its nearest `package.json` depends on `@nestjs/core` |
 
-Presets combine: each rule only looks at files of its stack's apps, found from the files themselves
-(React Router: the nearest `react-router.config.*` up to the package root). A monorepo with an Elysia
-API and a React Router SPA turns both on in one config, with no per-folder overrides.
+Stacks combine: each rule only looks at its own stack's apps, so a monorepo with an Elysia API and a
+React Router SPA turns both on in one config, with no per-folder overrides.
 
 ## Install
 
 ```bash
-bun add -d @netoun/eslint-plugin-structure
+bun add -d @netoun/oxlint-plugin-structure
 ```
 
 ```jsonc
 // .oxlintrc.json
 {
-  "jsPlugins": ["@netoun/eslint-plugin-structure"],
+  "jsPlugins": ["@netoun/oxlint-plugin-structure"],
   "settings": {
     "structure": {
       "react-router": { "mode": "pages" }
@@ -35,10 +34,21 @@ bun add -d @netoun/eslint-plugin-structure
     "structure/react-router-feature-prefix": "error",
     "structure/react-router-location": "error",
     "structure/react-router-reserved-suffixes": "error",
-    "structure/react-router-no-loose-files": "error"
+    "structure/react-router-no-loose-files": "error",
+
+    "structure/elysia-role-prefix": "error",
+    "structure/elysia-module-entry": "error",
+    "structure/elysia-contract-location": "error",
+
+    "structure/nestjs-role-prefix": "error",
+    "structure/nestjs-module-entry": "error"
   }
 }
 ```
+
+Keep the rules of the stacks you use. `elysia-file-prefix` and `nestjs-file-prefix` are left out
+above on purpose: they check every file of a module and run noisy on existing code; turn them on for
+a new project or once the other rules are green.
 
 ESLint flat config: `plugins: { structure }` with the same `settings` and `rules`.
 
@@ -91,9 +101,34 @@ turns a rule off silently.
 - File-system routes (`flatRoutes()`) are reported once on `routes.ts`, not checked.
 - Routes built from `relative()` or from computed paths are not seen.
 
-## Development
+## Elysia and NestJS
 
-```bash
-bun install
-bun run typecheck && bun run lint && bun run test   # test builds dist/ and lints fixtures with the real oxlint CLI
-```
+Both organise an API in modules: `src/modules/<module>/<module>.module.ts`, role files named
+`<module>.<role>.ts` or `<module>-….<role>.ts`, sub-features in sub-folders. A file may use the
+module's singular (`teams/team-colors.ts`) or any folder it sits in (`play/scan/play-scan.routes.ts`).
+
+| Rule                       | Checks                                                                 |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `*-role-prefix`            | a role file (`.module`, `.routes`/`.controller`, `.service`, `.contract`…) is named after its module: another name usually means it belongs to another module |
+| `*-module-entry`           | every folder of `src/modules/` has its `<module>.module.ts`; no file sits loose in `src/modules/` |
+| `*-file-prefix`            | every other file of a module starts with the module's name (noisy, see above) |
+| `elysia-contract-location` | a module's contracts live in `contracts/`; a sub-feature's may sit beside its routes |
+
+NestJS also allows `<module>.contract.ts` at the module root, and names `entities/` and `utils/` files
+after what they hold, so it has no contract rule and skips those folders.
+
+### Settings
+
+`settings.structure.elysia` and `settings.structure.nestjs`, same keys, every key optional:
+
+| Key               | Elysia default                                        | NestJS default |
+| ----------------- | ----------------------------------------------------- | -------------- |
+| `modulesDir`      | `"src/modules"`                                       | same           |
+| `testsFolder`     | `"test"`: cross-module tests, no rule looks inside    | same           |
+| `contractsFolder` | `"contracts"`                                         | same           |
+| `roles`           | `module routes service contract macro guard`          | `module controller service mapper contract entity factory guard filter query seeder` |
+| `freeNameFolders` | none                                                  | `entities utils` |
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
