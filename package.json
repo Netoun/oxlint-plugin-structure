@@ -47,7 +47,8 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "bun run build && bun test",
-    "lint": "oxlint src test scripts",
+    "lint": "oxlint src test scripts bench",
+    "bench": "bun run build && bun bench/run.ts",
     "prepublishOnly": "bun run typecheck && bun run test",
     "release": "bun scripts/release.ts"
   },
