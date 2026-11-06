@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import type { Rule, RuleContext } from "../eslint.js";
+import { perFile } from "../memo.js";
 import { nearestPackage } from "../package.js";
 import { readSection } from "../settings.js";
 import { ENTITY_LOCATION_DESCRIPTION, entityLocation } from "./entity-location.js";
@@ -41,7 +42,7 @@ export type ModuleFile = {
   /** Path shown in messages: `modules/<module>/…`. */
   path: string;
   /** Folders between the modules folder and the file; empty for a file loose in it. */
-  folders: string[];
+  folders: readonly string[];
   name: string;
   settings: ModuleSettings;
   modulesRoot: string;
@@ -50,19 +51,22 @@ export type ModuleFile = {
 /** `teams` → `team`, `categories` → `category`: a module's files may use the singular. */
 export const singular = (name: string) => name.replace(/ies$/, "y").replace(/s$/, "");
 
+/** Where the linted file sits for `stack`; every rule of the stack asks, so it is computed once per file. */
 export function moduleFile(stack: Stack, context: RuleContext): ModuleFile | null {
-  const read = readSection(context.settings, stack.id, stack.defaults, ["roles"]);
-  // Every rule reads the roles from `roles`: the extra ones join it here.
-  const settings = { ...read, roles: [...read.roles, ...read.extraRoles] };
-  const pkg = nearestPackage(context.filename);
-  if (!pkg?.dependencies.has(stack.dependency)) return null;
-  const modulesRoot = join(pkg.dir, settings.modulesDir);
-  const segments = relative(modulesRoot, resolve(context.filename)).split(/[\\/]/);
-  if (segments[0] === "..") return null;
-  const name = segments.pop() ?? "";
-  if (segments[0] === settings.testsFolder || name.endsWith(".d.ts")) return null;
-  const path = [basename(settings.modulesDir), ...segments, name].join("/");
-  return { path, folders: segments, name, settings, modulesRoot };
+  return perFile(`moduleFile:${stack.id}:${context.filename}`, () => {
+    const read = readSection(context.settings, stack.id, stack.defaults, ["roles"]);
+    // Every rule reads the roles from `roles`: the extra ones join it here.
+    const settings = { ...read, roles: [...read.roles, ...read.extraRoles] };
+    const pkg = nearestPackage(context.filename);
+    if (!pkg?.dependencies.has(stack.dependency)) return null;
+    const modulesRoot = join(pkg.dir, settings.modulesDir);
+    const segments = relative(modulesRoot, resolve(context.filename)).split(/[\\/]/);
+    if (segments[0] === "..") return null;
+    const name = segments.pop() ?? "";
+    if (segments[0] === settings.testsFolder || name.endsWith(".d.ts")) return null;
+    const path = [basename(settings.modulesDir), ...segments, name].join("/");
+    return { path, folders: segments, name, settings, modulesRoot };
+  });
 }
 
 /** Whether the prefix rules skip this file: it sits in a folder of free names. */
@@ -79,17 +83,20 @@ function isPrefixed({ folders, name, settings }: ModuleFile): boolean {
 
 export const roleOf = ({ name, settings }: ModuleFile) => settings.roles.find((role) => name.endsWith(`.${role}.ts`));
 
-/** A rule that runs `check` once per modules-folder file of the stack and reports what it returns. */
+/**
+ * A rule that runs `check` once per modules-folder file of the stack and reports what it returns. The
+ * check runs in `create`: only a file with a problem asks oxlint for its AST, to report on `Program`.
+ */
 function moduleFileRule(stack: Stack, description: string, check: (file: ModuleFile) => string | null): Rule {
   return {
     meta: { type: "problem", docs: { description }, schema: [] },
     create(context) {
       const file = moduleFile(stack, context);
-      if (file === null) return {};
+      const problem = file === null ? null : check(file);
+      if (file === null || problem === null) return {};
       return {
         Program(node) {
-          const problem = check(file);
-          if (problem !== null) context.report({ node, message: `${file.path}: ${problem}` });
+          context.report({ node, message: `${file.path}: ${problem}` });
         },
       };
     },

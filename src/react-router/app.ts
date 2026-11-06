@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { perFile } from "../memo.js";
 import { nearestPackage } from "../package.js";
 import { aliasTargets, readPathAliases, type PathAliases } from "../tsconfig.js";
 
@@ -46,6 +47,11 @@ function readApp(dir: string, configName: string): RouterApp {
 
 /** The React Router app `file` belongs to, or null. The search stops at the nearest package root. */
 export function findRouterApp(file: string): RouterApp | null {
+  // Every rule asks it of the linted file.
+  return perFile(`app:${file}`, () => searchRouterApp(file));
+}
+
+function searchRouterApp(file: string): RouterApp | null {
   const visited: string[] = [];
   let dir = dirname(resolve(file));
   let app: RouterApp | null = null;
@@ -69,20 +75,24 @@ export function findRouterApp(file: string): RouterApp | null {
   return app;
 }
 
-/** The app's routes file, or null when `appDirectory` has none. Not cached: it may appear later. */
+/** The app's routes file, or null when `appDirectory` has none. Looked up once per linted file: it may appear later. */
 export function routesFileOf(app: RouterApp): string | null {
-  const name = ROUTES_NAMES.find((candidate) => existsSync(join(app.srcDir, candidate)));
-  return name === undefined ? null : join(app.srcDir, name);
+  return perFile(`routesFile:${app.srcDir}`, () => {
+    const name = ROUTES_NAMES.find((candidate) => existsSync(join(app.srcDir, candidate)));
+    return name === undefined ? null : join(app.srcDir, name);
+  });
 }
 
-/** `file` relative to the app's source folder, with `/` separators. */
-export const appPath = (app: RouterApp, file: string): string => toPosix(relative(app.srcDir, resolve(file)));
+/** `file` relative to the app's source folder, with `/` separators. Every rule asks it of the linted file. */
+export const appPath = (app: RouterApp, file: string): string =>
+  perFile(`appPath:${app.srcDir}\0${file}`, () => toPosix(relative(app.srcDir, resolve(file))));
 
 /** `mtimeMs` of the file at `path`; null when there is none (or it is a folder). */
 function mtimeOf(path: string): number | null {
   try {
-    const stats = statSync(path);
-    return stats.isFile() ? stats.mtimeMs : null;
+    // Most paths probed do not exist: no exception to build for them (a denied access still throws).
+    const stats = statSync(path, { throwIfNoEntry: false });
+    return stats?.isFile() ? stats.mtimeMs : null;
   } catch {
     return null;
   }
@@ -211,13 +221,18 @@ const isFresh = (probed: ReadonlyMap<string, number | null>): boolean =>
 
 const aliasesByRoot = new Map<string, { probed: ReadonlyMap<string, number | null>; aliases: PathAliases }>();
 
-/** The `paths` aliases of the app's `tsconfig.json`. Cached until one of the files they come from changes. */
+/**
+ * The `paths` aliases of the app's `tsconfig.json`. Cached until one of the files they come from changes,
+ * which is checked once per linted file, not once per import.
+ */
 function aliasesOf(app: RouterApp): PathAliases {
-  const cached = aliasesByRoot.get(app.root);
-  if (cached && isFresh(cached.probed)) return cached.aliases;
-  const aliases = readPathAliases(join(app.root, "tsconfig.json"));
-  aliasesByRoot.set(app.root, { probed: new Map(aliases.files.map((file) => [file, mtimeOf(file)])), aliases });
-  return aliases;
+  return perFile(`aliases:${app.root}`, () => {
+    const cached = aliasesByRoot.get(app.root);
+    if (cached && isFresh(cached.probed)) return cached.aliases;
+    const aliases = readPathAliases(join(app.root, "tsconfig.json"));
+    aliasesByRoot.set(app.root, { probed: new Map(aliases.files.map((file) => [file, mtimeOf(file)])), aliases });
+    return aliases;
+  });
 }
 
 /**
@@ -241,10 +256,13 @@ export function resolveImportPath(app: RouterApp, from: string, specifier: strin
  * imports. Cached until one of them changes, appears or goes away.
  */
 export function readRoutes(app: RouterApp, routesFile: string): RoutesIndex {
-  const cached = routesByFile.get(routesFile);
-  if (cached && isFresh(cached.probed)) return cached.index;
-  const probed = new Map<string, number | null>();
-  const index = scanRoutes(app, routesFile, probed);
-  routesByFile.set(routesFile, { probed, index });
-  return index;
+  // Checked once per linted file, however many rules ask.
+  return perFile(`routes:${routesFile}`, () => {
+    const cached = routesByFile.get(routesFile);
+    if (cached && isFresh(cached.probed)) return cached.index;
+    const probed = new Map<string, number | null>();
+    const index = scanRoutes(app, routesFile, probed);
+    routesByFile.set(routesFile, { probed, index });
+    return index;
+  });
 }
