@@ -1,6 +1,6 @@
 {
   "name": "@netoun/oxlint-plugin-structure",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "oxlint / ESLint rules that keep a project's folders and file names on its stack's conventions: React Router, Elysia, NestJS.",
   "keywords": [
     "oxlint",
