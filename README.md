@@ -76,8 +76,10 @@ ESLint flat config: `plugins: { structure }` with the same `settings` and `rules
 
 ## React Router
 
-A **route module** is a file declared in the app's `routes.ts` with `route()`, `layout()` or `index()`
-(any local name, inside `prefix()` too).
+A **route module** is a file declared in the app's route config with `route()`, `layout()` or `index()`
+(any local name, inside `prefix()` too). The route config is `routes.ts` and every file it imports through
+a relative path (`./auth-routes`, `../shared/routes.js`, a folder's `index.ts`), inside the app's source
+folder: routes split across files are read like routes in one.
 
 | Rule                                  | Checks                                                                 |
 | ------------------------------------- | ---------------------------------------------------------------------- |
@@ -90,7 +92,9 @@ A **route module** is a file declared in the app's `routes.ts` with `route()`, `
 | `react-router-folder-contents`        | `hooks/` holds `use-*` files, `components/` holds `.tsx`, `lib/` and `utils/` hold no component |
 
 Resource routes (`.ts`, no component) skip the suffix and prefix rules. The first three rules report
-on the path string in `routes.ts`; the others report on the offending file.
+on the path string, in the config file that declares it; the others report on the offending file. A
+route config file is neither a route module nor a loose file, and `react-router-file-case` still applies
+to it.
 
 ### Modes
 
@@ -129,8 +133,10 @@ turns a rule off silently.
 
 ### Limits
 
-- File-system routes (`flatRoutes()`) are reported once on `routes.ts`, not checked.
+- File-system routes (`flatRoutes()`) are reported once, on the config file that calls it, not checked.
 - Routes built from `relative()` or from computed paths are not seen.
+- Only relative imports are followed. A route config reached through an alias (`~/features/auth/auth-routes`)
+  is not read: its routes count as undeclared, so import it with a relative path.
 
 ## Elysia and NestJS
 

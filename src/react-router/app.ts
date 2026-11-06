@@ -1,16 +1,28 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /** A React Router app: the folder `react-router.config.*` sits in, and its `appDirectory`. */
 export type RouterApp = { configName: string; appDirectory: string; srcDir: string };
 
-/** What a routes file declares, read from its text. */
-export type RoutesIndex = { files: ReadonlySet<string>; fileSystemRoutes: boolean };
+/**
+ * What the app's route config declares, read from the text of its files: the route modules, the files
+ * that make up the config (`routes.ts` and what it imports), and whether any of them calls `flatRoutes()`.
+ * Paths are relative to the app's source folder, with `/` separators.
+ */
+export type RoutesIndex = {
+  files: ReadonlySet<string>;
+  configFiles: ReadonlySet<string>;
+  fileSystemRoutes: boolean;
+};
 
 const CONFIG_NAMES = ["react-router.config.ts", "react-router.config.js", "react-router.config.mjs"];
 const ROUTES_NAMES = ["routes.ts", "routes.tsx", "routes.js", "routes.jsx", "routes.mjs"];
 const ROUTE_PATH = /["'`]((?:\.\/)?[^"'`\s]+\.[cm]?[jt]sx?)["'`]/g;
 const COMMENT = /\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm;
+const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
+/** `import … from "x"`, `export … from "x"`, `import "x"` and `import("x")`: the specifier is group 1 or 2. */
+const MODULE_SPECIFIER = /\b(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(?\s*["']([^"']+)["']/g;
+const RELATIVE_SPECIFIER = /^\.\.?(?:\/|$)/;
 
 export const toPosix = (path: string): string => path.split(sep).join("/");
 
@@ -56,19 +68,92 @@ export function routesFileOf(app: RouterApp): string | null {
 /** `file` relative to the app's source folder, with `/` separators. */
 export const appPath = (app: RouterApp, file: string): string => toPosix(relative(app.srcDir, resolve(file)));
 
-const routesByFile = new Map<string, { mtimeMs: number; index: RoutesIndex }>();
+/** `mtimeMs` of the file at `path`; null when there is none (or it is a folder). */
+function mtimeOf(path: string): number | null {
+  try {
+    const stats = statSync(path);
+    return stats.isFile() ? stats.mtimeMs : null;
+  } catch {
+    return null;
+  }
+}
 
-/** The module paths a routes file declares, ignoring commented-out routes. Cached until it changes. */
-export function readRoutes(routesFile: string): RoutesIndex {
-  const { mtimeMs } = statSync(routesFile);
+const isInside = (dir: string, path: string): boolean => {
+  const from = relative(dir, path);
+  return from !== "" && from !== ".." && !from.startsWith(`..${sep}`) && !isAbsolute(from);
+};
+
+/**
+ * The file a relative `specifier` names, as the bundler resolves it: the exact file, `./x` → `x.ts`…,
+ * `./x.js` → `x.ts` (how ESM TypeScript spells it), a folder → its `index.*`. Null when nothing is there
+ * or it lies outside the app's source folder. Every path tried goes into `probed`, so a file that
+ * appears later is noticed.
+ */
+function resolveImport(app: RouterApp, from: string, specifier: string, probed: Map<string, number | null>): string | null {
+  const base = resolve(dirname(from), specifier);
+  if (!isInside(app.srcDir, base)) return null;
+  const stem = base.replace(/\.[cm]?jsx?$/, "");
+  const candidates = [
+    ...(SOURCE_EXTENSIONS.some((extension) => base.endsWith(extension)) ? [base] : []),
+    ...SOURCE_EXTENSIONS.map((extension) => `${stem}${extension}`),
+    ...SOURCE_EXTENSIONS.map((extension) => join(base, `index${extension}`)),
+  ];
+  for (const candidate of candidates) {
+    const mtime = mtimeOf(candidate);
+    probed.set(candidate, mtime);
+    if (mtime !== null) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Reads `routesFile` and, recursively, every file it imports through a relative specifier: React Router
+ * resolves a route module's path against `appDirectory` whichever file calls `route()`, so a config
+ * split across files declares its routes the same way. `probed` ends up with the mtime of every path
+ * looked at, the cache key.
+ */
+function scanRoutes(app: RouterApp, routesFile: string, probed: Map<string, number | null>): RoutesIndex {
+  const files = new Set<string>();
+  const configFiles = new Set<string>();
+  let fileSystemRoutes = false;
+  const seen = new Set([routesFile]);
+  const pending = [routesFile];
+  for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
+    const mtime = mtimeOf(file);
+    probed.set(file, mtime);
+    if (mtime === null) continue;
+    configFiles.add(appPath(app, file));
+    const text = readFileSync(file, "utf8").replace(COMMENT, "");
+    for (const match of text.matchAll(MODULE_SPECIFIER)) {
+      const specifier = match[1] ?? match[2] ?? "";
+      const imported = RELATIVE_SPECIFIER.test(specifier) ? resolveImport(app, file, specifier, probed) : null;
+      if (imported !== null && !seen.has(imported)) {
+        seen.add(imported);
+        pending.push(imported);
+      }
+    }
+    // The import specifiers go first: `from "./x.ts"` names a config file, not a route module.
+    const code = text.replace(MODULE_SPECIFIER, "");
+    for (const match of code.matchAll(ROUTE_PATH)) files.add((match[1] ?? "").replace(/^\.\//, ""));
+    fileSystemRoutes ||= /\bflatRoutes\s*\(/.test(code);
+  }
+  return { files, configFiles, fileSystemRoutes };
+}
+
+const routesByFile = new Map<string, { probed: ReadonlyMap<string, number | null>; index: RoutesIndex }>();
+
+const isFresh = (probed: ReadonlyMap<string, number | null>): boolean =>
+  [...probed].every(([path, mtime]) => mtimeOf(path) === mtime);
+
+/**
+ * What the app's route config declares, ignoring commented-out routes: `routesFile` plus the files it
+ * imports. Cached until one of them changes, appears or goes away.
+ */
+export function readRoutes(app: RouterApp, routesFile: string): RoutesIndex {
   const cached = routesByFile.get(routesFile);
-  if (cached?.mtimeMs === mtimeMs) return cached.index;
-
-  const code = readFileSync(routesFile, "utf8").replace(COMMENT, "");
-  const index: RoutesIndex = {
-    files: new Set([...code.matchAll(ROUTE_PATH)].map((match) => (match[1] ?? "").replace(/^\.\//, ""))),
-    fileSystemRoutes: /\bflatRoutes\s*\(/.test(code),
-  };
-  routesByFile.set(routesFile, { mtimeMs, index });
+  if (cached && isFresh(cached.probed)) return cached.index;
+  const probed = new Map<string, number | null>();
+  const index = scanRoutes(app, routesFile, probed);
+  routesByFile.set(routesFile, { probed, index });
   return index;
 }

@@ -15,8 +15,10 @@ type Project = {
   settings?: Record<string, unknown>;
   /** Text of `apps/web/src/routes.ts`; omitted means the app has no routes file. */
   routes?: string;
-  /** Files under `apps/web/src`. */
+  /** Files under `apps/web/src`, empty. */
   files?: string[];
+  /** Files under `apps/web/src` with their text; a `../` path lands outside the app folder. */
+  sources?: Record<string, string>;
   /** Write `react-router.config.ts`; false makes `apps/web` a plain package. */
   reactRouter?: boolean;
 };
@@ -24,11 +26,12 @@ type Project = {
 const ROUTES_IMPORT = 'import { index, layout, prefix, route } from "@react-router/dev/routes";\n';
 
 /** Lints `apps/web` with every react-router rule on; returns `rule: message` lines without the `react-router-` prefix. */
-function lint({ settings, routes, files = [], reactRouter = true }: Project): string[] {
+function lint({ settings, routes, files = [], sources = {}, reactRouter = true }: Project): string[] {
   const tree: Record<string, string> = {};
   if (reactRouter) tree["apps/web/react-router.config.ts"] = 'export default { appDirectory: "src" };\n';
   if (routes !== undefined) tree["apps/web/src/routes.ts"] = routes;
   for (const file of files) tree[`apps/web/src/${file}`] = EMPTY_MODULE;
+  for (const [file, text] of Object.entries(sources)) tree[`apps/web/src/${file}`] = text;
   return lintFixture({ files: tree, structure: settings ? { "react-router": settings } : undefined, rules: RULES }).map(
     (line) => line.replace(/^react-router-/, ""),
   );
@@ -187,6 +190,188 @@ describe("routes.ts forms", () => {
       }),
     ).toEqual([
       "location: routes.ts: file-system routes (flatRoutes) are not checked → declare routes with route()/layout()/index(), or turn the react-router rules off for this app",
+    ]);
+  });
+});
+
+describe("routes split across files", () => {
+  test("reads the routes declared in a file routes.ts imports", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}import { authRoutes } from "./features/auth/auth-routes";
+          export default [route("games", "features/game/pages/game-page.tsx"), ...authRoutes];`,
+        sources: {
+          "features/auth/auth-routes.ts": `${ROUTES_IMPORT}export const authRoutes = [route("login", "features/auth/pages/auth-login-page.tsx")];`,
+        },
+        files: ["features/game/pages/game-page.tsx", "features/auth/pages/auth-login-page.tsx"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("resolves ./x.js to x.ts, a folder to its index and follows chains of imports", () => {
+    expect(
+      lint({
+        routes: `import { a } from "./features/a/a-routes.js";
+          import { b } from "./features/b";
+          export default [...a, ...b];`,
+        sources: {
+          "features/a/a-routes.ts": `${ROUTES_IMPORT}import { c } from "../c/c-routes";
+            export const a = [route("a", "features/a/pages/a-page.tsx"), ...c];`,
+          "features/b/index.ts": `export { b } from "./b-routes";`,
+          "features/b/b-routes.ts": `${ROUTES_IMPORT}export const b = [route("b", "features/b/pages/b-page.tsx")];`,
+          "features/c/c-routes.ts": `${ROUTES_IMPORT}export const c = [route("c", "features/c/pages/c-page.tsx")];`,
+        },
+        files: ["features/a/pages/a-page.tsx", "features/b/pages/b-page.tsx", "features/c/pages/c-page.tsx"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("stops on files that import each other", () => {
+    expect(
+      lint({
+        routes: `import { authRoutes } from "./features/auth/auth-routes";\nexport default [...authRoutes];`,
+        sources: {
+          "features/auth/auth-routes.ts": `${ROUTES_IMPORT}import "../../routes";
+            import "./auth-routes";
+            export const authRoutes = [route("login", "features/auth/pages/auth-login-page.tsx")];`,
+        },
+        files: ["features/auth/pages/auth-login-page.tsx"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("checks each route declared in such a file, and reports it there", () => {
+    expect(
+      lint({
+        routes: `import { authRoutes } from "./features/auth/auth-routes";\nexport default [...authRoutes];`,
+        sources: {
+          "features/auth/auth-routes.ts": `${ROUTES_IMPORT}export const authRoutes = [
+            route("login", "features/auth/pages/login.tsx"),
+            route("legacy", "routes/legacy-page.tsx"),
+            layout("features/auth/pages/auth-shell-page.tsx", [index("features/auth/pages/auth-home-page.tsx")]),
+          ];`,
+        },
+        files: [
+          "features/auth/pages/login.tsx",
+          "routes/legacy-page.tsx",
+          "features/auth/pages/auth-shell-page.tsx",
+          "features/auth/pages/auth-home-page.tsx",
+        ],
+      }),
+    ).toEqual(
+      [
+        "location: routes/legacy-page.tsx: route modules live in features/<feature>/pages/ → move it there and update features/auth/auth-routes.ts",
+        "role-suffix: features/auth/pages/login.tsx: leaf route → name it *-page.tsx or *-redirect.tsx",
+        "feature-prefix: features/auth/pages/login.tsx: the name does not start with its feature → rename it auth-…",
+        "role-suffix: features/auth/pages/auth-shell-page.tsx: has child routes, so it is a layout → name it *-layout.tsx",
+      ].sort(),
+    );
+  });
+
+  test("does not call a route config file a loose file, but still a file nothing imports", () => {
+    expect(
+      lint({
+        routes: `import { authRoutes } from "./features/auth/auth-routes";\nexport default [...authRoutes];`,
+        sources: {
+          "features/auth/auth-routes.ts": `${ROUTES_IMPORT}export const authRoutes = [route("login", "features/auth/pages/auth-login-page.tsx")];`,
+        },
+        files: ["features/auth/pages/auth-login-page.tsx", "features/auth/other-routes.ts", "features/auth/types.ts"],
+      }),
+    ).toEqual([
+      "no-loose-files: features/auth/other-routes.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
+      "no-loose-files: features/auth/types.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
+    ]);
+  });
+
+  test("still asks a route config file for kebab-case", () => {
+    expect(
+      lint({
+        routes: `import { authRoutes } from "./features/auth/authRoutes";\nexport default [...authRoutes];`,
+        sources: {
+          "features/auth/authRoutes.ts": `${ROUTES_IMPORT}export const authRoutes = [route("login", "features/auth/pages/auth-login-page.tsx")];`,
+        },
+        files: ["features/auth/pages/auth-login-page.tsx"],
+      }),
+    ).toEqual(["file-case: features/auth/authRoutes.ts: the name is not kebab-case → rename it auth-routes.ts"]);
+  });
+
+  test("reports file-system routes on the file that calls flatRoutes()", () => {
+    expect(
+      lint({
+        routes: `import { authRoutes } from "./features/auth/auth-routes";\nexport default [...authRoutes];`,
+        sources: {
+          "features/auth/auth-routes.ts": `import { flatRoutes } from "@react-router/fs-routes";\nexport const authRoutes = flatRoutes();`,
+        },
+        files: ["features/auth/pages/login.tsx"],
+      }),
+    ).toEqual([
+      "location: features/auth/auth-routes.ts: file-system routes (flatRoutes) are not checked → declare routes with route()/layout()/index(), or turn the react-router rules off for this app",
+    ]);
+  });
+
+  test("does not take an import specifier for a route module: mode flat keeps lib/ free of routes", () => {
+    expect(
+      lint({
+        settings: { mode: "flat" },
+        routes: `import { authRoutes } from "./features/auth/lib/auth-routes.js";\nexport default [...authRoutes];`,
+        sources: {
+          "features/auth/lib/auth-routes.ts": `${ROUTES_IMPORT}export const authRoutes = [route("login", "features/auth/auth-login-page.tsx")];`,
+          "features/auth/lib/auth-paths.ts": EMPTY_MODULE,
+        },
+        files: ["features/auth/auth-login-page.tsx"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("follows relative imports only, and only inside the app folder", () => {
+    expect(
+      lint({
+        routes: `import { authRoutes } from "~/features/auth/auth-routes";
+          import { sharedRoutes } from "../shared-routes";
+          export default [...authRoutes, ...sharedRoutes];`,
+        sources: {
+          "features/auth/auth-routes.ts": `${ROUTES_IMPORT}export const authRoutes = [route("login", "features/auth/pages/auth-login-page.tsx")];`,
+          "../shared-routes.ts": `${ROUTES_IMPORT}export const sharedRoutes = [route("x", "features/shared/pages/x.tsx")];`,
+        },
+        files: ["features/auth/pages/auth-login-page.tsx"],
+      }),
+    ).toEqual([
+      "no-loose-files: features/auth/auth-routes.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
+      "reserved-suffixes: features/auth/pages/auth-login-page.tsx: *-page.tsx, *-redirect.tsx and *-layout.tsx are reserved for files declared in routes.ts → rename it, or route it",
+    ]);
+  });
+});
+
+describe("child routes", () => {
+  test("a layout may receive its children by variable, spread or call, a leaf its options", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}const children = [route("c", "features/auth/pages/auth-child-page.tsx")];
+          const homeOptions = { id: "home" };
+          export default [
+            route("a", "features/auth/pages/auth-layout.tsx", children),
+            layout("features/shell/pages/shell-layout.tsx", children),
+            layout("features/billing/pages/billing-layout.tsx", [...children]),
+            layout("features/audit/pages/audit-layout.tsx", { id: "audit" }, children),
+            ...prefix("p", [layout("features/pro/pages/pro-layout.tsx", prefix("q", children))]),
+            route("b", "features/billing/pages/billing-page.tsx", { id: "billing" }),
+            route("c", "features/billing/pages/billing-extra-page.tsx", { id: "extra" }, []),
+            index("features/home/pages/home-page.tsx", homeOptions),
+            index("features/home/pages/home-redirect.tsx", { id: "home-redirect" }),
+            route("x", "features/x/pages/x-page.tsx", []),
+          ];`,
+      }),
+    ).toEqual([]);
+  });
+
+  test("a *-page that receives its children by variable is told to be a layout, not a leaf", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}const children = [route("c", "features/shell/pages/shell-child-page.tsx")];
+          export default [layout("features/shell/pages/shell-page.tsx", children)];`,
+      }),
+    ).toEqual([
+      "role-suffix: features/shell/pages/shell-page.tsx: has child routes, so it is a layout → name it *-layout.tsx",
     ]);
   });
 });

@@ -49,11 +49,29 @@ export function staticString(node: AstNode | undefined): string | null {
   return null;
 }
 
-export const isNonEmptyArray = (node: AstNode): boolean =>
+const isNonEmptyArray = (node: AstNode): boolean =>
   node.type === "ArrayExpression" &&
   "elements" in node &&
   Array.isArray(node.elements) &&
   node.elements.length > 0;
+
+/**
+ * Whether `node`, an argument after a route's file, can hold child routes: a non-empty array
+ * (`[...children]` too), or any expression, as `children` or `prefix("p", children)`, that is not an
+ * options object, a literal or an empty array.
+ */
+export function mayHoldRoutes(node: AstNode): boolean {
+  switch (node.type) {
+    case "ArrayExpression":
+      return isNonEmptyArray(node);
+    case "ObjectExpression":
+    case "Literal":
+    case "TemplateLiteral":
+      return false;
+    default:
+      return true;
+  }
+}
 
 /** Local name → imported name, for the named imports of `node`. */
 export function namedImports(node: ImportDeclaration): Map<string, string> {

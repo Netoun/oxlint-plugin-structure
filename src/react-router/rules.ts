@@ -1,6 +1,6 @@
 import { basename, dirname, extname } from "node:path";
 import {
-  isNonEmptyArray,
+  mayHoldRoutes,
   namedImports,
   staticString,
   type AstNode,
@@ -12,7 +12,8 @@ import { appPath, findRouterApp, readRoutes, routesFileOf, type RouterApp, type 
 import { readSettings, type ReactRouterSettings } from "./settings.js";
 
 type RouteHelper = "route" | "layout" | "index";
-type Declaration = { file: string; node: AstNode; hasChildren: boolean };
+/** A `route()`/`layout()`/`index()` call: the route module it names, and the config file it is written in. */
+type Declaration = { file: string; node: AstNode; hasChildren: boolean; configFile: string };
 
 const HELPERS: readonly string[] = ["route", "layout", "index"];
 const isHelper = (name: string): name is RouteHelper => HELPERS.includes(name);
@@ -51,18 +52,21 @@ const reservedSuffix = (settings: ReactRouterSettings) =>
   new RegExp(`-(${[...settings.leafSuffixes, ...settings.layoutSuffixes].join("|")})\\.[jt]sx$`);
 
 /**
- * Visits the app's routes file only. `check` gets each `route()`/`layout()`/`index()` declaration,
- * imported under any local name; `onFileSystemRoutes` gets each `flatRoutes()` call.
+ * Visits the files of the app's route config: `routes.ts` and the files it imports through relative
+ * specifiers. `check` gets each `route()`/`layout()`/`index()` declaration, imported under any local
+ * name; `onFileSystemRoutes` gets each `flatRoutes()` call, with the path of the file it is in.
  */
 function routesFileRule(
   context: RuleContext,
   check: (declaration: Declaration, settings: ReactRouterSettings) => string[],
-  onFileSystemRoutes?: (node: AstNode, routesFile: string) => void,
+  onFileSystemRoutes?: (node: AstNode, configFile: string) => void,
 ): Visitor {
   const settings = readSettings(context.settings);
   const app = findRouterApp(context.filename);
   const routesFile = app ? routesFileOf(app) : null;
-  if (!app || routesFile === null || appPath(app, routesFile) !== appPath(app, context.filename)) return {};
+  if (!app || routesFile === null) return {};
+  const configFile = appPath(app, context.filename);
+  if (!readRoutes(app, routesFile).configFiles.has(configFile)) return {};
 
   const helpers = new Map<string, RouteHelper>();
   const fileSystemRoutes = new Set<string>();
@@ -77,18 +81,23 @@ function routesFileRule(
       if (node.callee.type !== "Identifier" || !("name" in node.callee) || typeof node.callee.name !== "string") return;
       const callee = node.callee.name;
       if (fileSystemRoutes.has(callee)) {
-        onFileSystemRoutes?.(node, appPath(app, routesFile));
+        onFileSystemRoutes?.(node, configFile);
         return;
       }
       const helper = helpers.get(callee);
       if (helper === undefined) return;
-      const fileNode = helper === "route" ? node.arguments[1] : node.arguments[0];
+      const fileIndex = helper === "route" ? 1 : 0;
+      const fileNode = node.arguments[fileIndex];
       const file = staticString(fileNode);
       if (fileNode === undefined || file === null) return;
+      // `route(path, file, children?)`, `layout(file, children?)`, and with options before the children
+      // (`route(path, file, options, children?)`): only the last argument can hold them. `index()` has none.
+      const last = helper === "index" ? undefined : node.arguments.slice(fileIndex + 1).at(-1);
       const declaration = {
         file: file.replace(/^\.\//, ""),
         node: fileNode,
-        hasChildren: node.arguments.slice(1).some(isNonEmptyArray),
+        hasChildren: last !== undefined && mayHoldRoutes(last),
+        configFile,
       };
       for (const problem of check(declaration, settings)) {
         context.report({ node: fileNode, message: `${declaration.file}: ${problem}` });
@@ -98,8 +107,9 @@ function routesFileRule(
 }
 
 /**
- * Visits files under `featuresDir` that the routes file does not declare. `check` returns one
- * problem or null; it also gets null `routes` when the app has no routes file.
+ * Visits files under `featuresDir` that the route config does not declare, and that are not part of
+ * it (a route config file is neither a route module nor a loose file). `check` returns one problem or
+ * null; it also gets null `routes` when the app has no routes file.
  */
 function featureFileRule(
   context: RuleContext,
@@ -118,8 +128,8 @@ function featureFileRule(
   return {
     Program(node) {
       const routesFile = routesFileOf(app);
-      const routes = routesFile === null ? null : readRoutes(routesFile);
-      if (routes?.fileSystemRoutes || routes?.files.has(file)) return;
+      const routes = routesFile === null ? null : readRoutes(app, routesFile);
+      if (routes?.fileSystemRoutes || routes?.files.has(file) || routes?.configFiles.has(file)) return;
       const problem = check(file, routes, settings, app);
       if (problem !== null) context.report({ node, message: `${file}: ${problem}` });
     },
@@ -172,14 +182,14 @@ const location: Rule = {
   create: (context) =>
     routesFileRule(
       context,
-      ({ file }, settings) =>
+      ({ file, configFile }, settings) =>
         file.startsWith(`${settings.featuresDir}/`) && isInRouteFolder(dirname(file), settings)
           ? []
-          : [`route modules live in ${routeHome(settings)} → move it there and update routes.ts`],
-      (node, routesFile) =>
+          : [`route modules live in ${routeHome(settings)} → move it there and update ${configFile}`],
+      (node, configFile) =>
         context.report({
           node,
-          message: `${routesFile}: file-system routes (flatRoutes) are not checked → declare routes with route()/layout()/index(), or turn the react-router rules off for this app`,
+          message: `${configFile}: file-system routes (flatRoutes) are not checked → declare routes with route()/layout()/index(), or turn the react-router rules off for this app`,
         }),
     ),
 };
