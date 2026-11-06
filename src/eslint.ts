@@ -10,8 +10,17 @@ export type CallExpression = AstNode & {
 
 export type ImportDeclaration = AstNode & {
   type: "ImportDeclaration";
-  source: { value: unknown };
+  source: AstNode & { value: unknown };
   specifiers: AstNode[];
+};
+
+/** `export … from "x"` and `export * from "x"`; `source` is null for a plain `export { a }`. */
+export type ExportDeclaration = AstNode & { source: (AstNode & { value: unknown }) | null };
+
+export type VariableDeclarator = AstNode & {
+  type: "VariableDeclarator";
+  id: AstNode;
+  init: AstNode | null;
 };
 
 export type RuleContext = {
@@ -24,6 +33,9 @@ export type Visitor = {
   Program?: (node: AstNode) => void;
   CallExpression?: (node: CallExpression) => void;
   ImportDeclaration?: (node: ImportDeclaration) => void;
+  ExportNamedDeclaration?: (node: ExportDeclaration) => void;
+  ExportAllDeclaration?: (node: ExportDeclaration) => void;
+  VariableDeclarator?: (node: VariableDeclarator) => void;
 };
 
 export type Rule = {
@@ -82,6 +94,36 @@ export function namedImports(node: ImportDeclaration): Map<string, string> {
     if (!isRecord(imported) || !isRecord(local) || typeof local.name !== "string") continue;
     const name = typeof imported.name === "string" ? imported.name : imported.value;
     if (typeof name === "string") names.set(local.name, name);
+  }
+  return names;
+}
+
+/** `import.meta.dirname` or `__dirname`: the folder of the file it is written in. */
+export function isOwnFolder(node: AstNode | undefined): boolean {
+  if (node === undefined) return false;
+  if (node.type === "Identifier") return "name" in node && node.name === "__dirname";
+  if (node.type !== "MemberExpression" || !("object" in node) || !("property" in node)) return false;
+  const { object, property } = node;
+  return (
+    isRecord(object) &&
+    object.type === "MetaProperty" &&
+    isRecord(object.meta) &&
+    object.meta.name === "import" &&
+    isRecord(property) &&
+    property.name === "dirname"
+  );
+}
+
+/** Local name → key, for the `{ key, key: local }` entries of an object pattern; null for another node. */
+export function destructuredNames(node: AstNode): Map<string, string> | null {
+  if (node.type !== "ObjectPattern" || !("properties" in node) || !Array.isArray(node.properties)) return null;
+  const properties: unknown[] = node.properties;
+  const names = new Map<string, string>();
+  for (const property of properties) {
+    if (!isRecord(property) || property.type !== "Property" || property.computed === true) continue;
+    const { key, value } = property;
+    const name = isRecord(key) ? (typeof key.name === "string" ? key.name : key.value) : undefined;
+    if (typeof name === "string" && isRecord(value) && typeof value.name === "string") names.set(value.name, name);
   }
   return names;
 }

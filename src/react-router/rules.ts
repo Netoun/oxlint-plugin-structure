@@ -1,9 +1,14 @@
-import { basename, dirname, extname } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 import {
+  destructuredNames,
+  isOwnFolder,
   mayHoldRoutes,
+  isRecord,
   namedImports,
   staticString,
   type AstNode,
+  type ExportDeclaration,
+  type ImportDeclaration,
   type Rule,
   type RuleContext,
   type Visitor,
@@ -51,50 +56,104 @@ function featureNames(dir: string, settings: ReactRouterSettings): string[] {
 const reservedSuffix = (settings: ReactRouterSettings) =>
   new RegExp(`-(${[...settings.leafSuffixes, ...settings.layoutSuffixes].join("|")})\\.[jt]sx$`);
 
+/** A route helper in scope: which one, and the folder its paths start from (null: the app folder). */
+type HelperBinding = { helper: RouteHelper; base: string | null };
+
+const ROUTES_MODULE = "@react-router/dev/routes";
+
 /**
  * Visits the files of the app's route config: `routes.ts` and the files it imports through relative
- * specifiers. `check` gets each `route()`/`layout()`/`index()` declaration, imported under any local
- * name; `onFileSystemRoutes` gets each `flatRoutes()` call, with the path of the file it is in.
+ * specifiers or tsconfig aliases. `check` gets each `route()`/`layout()`/`index()` declaration, imported
+ * under any local name or destructured from `relative(import.meta.dirname)`. `onUnchecked` gets each
+ * part of the config the rules cannot read (`flatRoutes()`, a computed path, another `relative()`, an
+ * import nothing resolves), with the problem and its fix.
  */
 function routesFileRule(
   context: RuleContext,
   check: (declaration: Declaration, settings: ReactRouterSettings) => string[],
-  onFileSystemRoutes?: (node: AstNode, configFile: string) => void,
+  onUnchecked?: (node: AstNode, problem: string, configFile: string) => void,
 ): Visitor {
   const settings = readSettings(context.settings);
   const app = findRouterApp(context.filename);
   const routesFile = app ? routesFileOf(app) : null;
   if (!app || routesFile === null) return {};
   const configFile = appPath(app, context.filename);
-  if (!readRoutes(app, routesFile).configFiles.has(configFile)) return {};
+  const routes = readRoutes(app, routesFile);
+  if (!routes.configFiles.has(configFile)) return {};
 
-  const helpers = new Map<string, RouteHelper>();
+  const helpers = new Map<string, HelperBinding>();
   const fileSystemRoutes = new Set<string>();
+  const relativeNames = new Set<string>();
+  const readRelativeCalls = new Set<AstNode>();
+  const unfollowed = routes.unfollowed.get(configFile);
+  const onImport = (node: ImportDeclaration | ExportDeclaration) => {
+    const source = node.source;
+    if (source === null || typeof source.value !== "string" || !unfollowed?.has(source.value)) return;
+    onUnchecked?.(
+      source,
+      `"${source.value}" is not followed, so the routes it declares are not checked → import it with a relative path, or declare its alias in tsconfig.json compilerOptions.paths`,
+      configFile,
+    );
+  };
   return {
     ImportDeclaration(node) {
+      onImport(node);
       for (const [local, imported] of namedImports(node)) {
-        if (node.source.value === "@react-router/dev/routes" && isHelper(imported)) helpers.set(local, imported);
+        if (node.source.value === ROUTES_MODULE && isHelper(imported)) helpers.set(local, { helper: imported, base: null });
+        if (node.source.value === ROUTES_MODULE && imported === "relative") relativeNames.add(local);
         if (node.source.value === "@react-router/fs-routes" && imported === "flatRoutes") fileSystemRoutes.add(local);
+      }
+    },
+    ExportNamedDeclaration: onImport,
+    ExportAllDeclaration: onImport,
+    // `const { route, index } = relative(import.meta.dirname)`: helpers whose paths start from this file's folder.
+    VariableDeclarator(node) {
+      const { init } = node;
+      if (init?.type !== "CallExpression" || !("callee" in init) || !("arguments" in init)) return;
+      const { callee, arguments: args } = init;
+      if (!isRecord(callee) || typeof callee.name !== "string" || !relativeNames.has(callee.name)) return;
+      const names = destructuredNames(node.id);
+      if (names === null || !Array.isArray(args) || args.length !== 1 || !isOwnFolder(args[0])) return;
+      readRelativeCalls.add(init);
+      for (const [local, key] of names) {
+        if (isHelper(key)) helpers.set(local, { helper: key, base: dirname(resolve(context.filename)) });
       }
     },
     CallExpression(node) {
       if (node.callee.type !== "Identifier" || !("name" in node.callee) || typeof node.callee.name !== "string") return;
       const callee = node.callee.name;
       if (fileSystemRoutes.has(callee)) {
-        onFileSystemRoutes?.(node, configFile);
+        onUnchecked?.(
+          node,
+          "file-system routes (flatRoutes) are not checked → declare routes with route()/layout()/index(), or turn the react-router rules off for this app",
+          configFile,
+        );
         return;
       }
-      const helper = helpers.get(callee);
-      if (helper === undefined) return;
+      if (relativeNames.has(callee) && !readRelativeCalls.has(node)) {
+        onUnchecked?.(
+          node,
+          "the routes declared through this relative() call are not checked → write const { route, index, layout } = relative(import.meta.dirname)",
+          configFile,
+        );
+        return;
+      }
+      const binding = helpers.get(callee);
+      if (binding === undefined) return;
+      const { helper, base } = binding;
       const fileIndex = helper === "route" ? 1 : 0;
       const fileNode = node.arguments[fileIndex];
+      if (fileNode === undefined) return;
       const file = staticString(fileNode);
-      if (fileNode === undefined || file === null) return;
+      if (file === null) {
+        onUnchecked?.(fileNode, "a route module path is computed, so it is not checked → write it as a string literal", configFile);
+        return;
+      }
       // `route(path, file, children?)`, `layout(file, children?)`, and with options before the children
       // (`route(path, file, options, children?)`): only the last argument can hold them. `index()` has none.
       const last = helper === "index" ? undefined : node.arguments.slice(fileIndex + 1).at(-1);
       const declaration = {
-        file: file.replace(/^\.\//, ""),
+        file: base === null ? file.replace(/^\.\//, "") : appPath(app, resolve(base, file)),
         node: fileNode,
         hasChildren: last !== undefined && mayHoldRoutes(last),
         configFile,
@@ -186,11 +245,7 @@ const location: Rule = {
         file.startsWith(`${settings.featuresDir}/`) && isInRouteFolder(dirname(file), settings)
           ? []
           : [`route modules live in ${routeHome(settings)} → move it there and update ${configFile}`],
-      (node, configFile) =>
-        context.report({
-          node,
-          message: `${configFile}: file-system routes (flatRoutes) are not checked → declare routes with route()/layout()/index(), or turn the react-router rules off for this app`,
-        }),
+      (node, problem, configFile) => context.report({ node, message: `${configFile}: ${problem}` }),
     ),
 };
 

@@ -323,7 +323,7 @@ describe("routes split across files", () => {
     ).toEqual([]);
   });
 
-  test("follows relative imports only, and only inside the app folder", () => {
+  test("says when an alias cannot be followed, and does not read a file out of the app folder", () => {
     expect(
       lint({
         routes: `import { authRoutes } from "~/features/auth/auth-routes";
@@ -335,10 +335,160 @@ describe("routes split across files", () => {
         },
         files: ["features/auth/pages/auth-login-page.tsx"],
       }),
+    ).toEqual(
+      [
+        `location: routes.ts: "~/features/auth/auth-routes" is not followed, so the routes it declares are not checked → import it with a relative path, or declare its alias in tsconfig.json compilerOptions.paths`,
+        "no-loose-files: features/auth/auth-routes.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
+        "reserved-suffixes: features/auth/pages/auth-login-page.tsx: *-page.tsx, *-redirect.tsx and *-layout.tsx are reserved for files declared in routes.ts → rename it, or route it",
+      ].sort(),
+    );
+  });
+});
+
+describe("routes split with relative()", () => {
+  const ADMIN_ROUTES = `import { relative } from "@react-router/dev/routes";
+    const { route, index } = relative(import.meta.dirname);`;
+
+  test("reads the documented form, relative(import.meta.dirname), even mixed with app-level helpers", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}import { adminRoutes } from "./features/admin/admin-routes";
+          export default [route("admin", "features/admin/pages/admin-layout.tsx", adminRoutes)];`,
+        sources: {
+          "features/admin/admin-routes.ts": `${ADMIN_ROUTES}
+            import { route as appRoute } from "@react-router/dev/routes";
+            export const adminRoutes = [
+              index("./pages/admin-home-page.tsx"),
+              route("users", "pages/admin-users-page.tsx"),
+              appRoute("audit", "features/admin/pages/admin-audit-page.tsx"),
+            ];`,
+        },
+        files: [
+          "features/admin/pages/admin-layout.tsx",
+          "features/admin/pages/admin-home-page.tsx",
+          "features/admin/pages/admin-users-page.tsx",
+          "features/admin/pages/admin-audit-page.tsx",
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  test("checks the routes its helpers declare, named by their path from the app folder", () => {
+    expect(
+      lint({
+        routes: `import { adminRoutes } from "./features/admin/admin-routes";\nexport default [...adminRoutes];`,
+        sources: {
+          "features/admin/admin-routes.ts": `${ADMIN_ROUTES}
+            export const adminRoutes = [route("users", "./pages/users.tsx"), route("x", "../x/x-page.tsx")];`,
+        },
+        files: ["features/admin/pages/users.tsx", "features/x/x-page.tsx"],
+      }),
+    ).toEqual(
+      [
+        "role-suffix: features/admin/pages/users.tsx: leaf route → name it *-page.tsx or *-redirect.tsx",
+        "feature-prefix: features/admin/pages/users.tsx: the name does not start with its feature → rename it admin-…",
+        "location: features/x/x-page.tsx: route modules live in features/<feature>/pages/ → move it there and update features/admin/admin-routes.ts",
+      ].sort(),
+    );
+  });
+
+  test("says when it cannot read a relative() call", () => {
+    expect(
+      lint({
+        routes: `import { adminRoutes, otherRoutes } from "./features/admin/admin-routes";\nexport default [...adminRoutes, ...otherRoutes];`,
+        sources: {
+          "features/admin/admin-routes.ts": `import { relative } from "@react-router/dev/routes";
+            const elsewhere = relative("/somewhere/else");
+            const helpers = relative(import.meta.dirname);
+            export const adminRoutes = [elsewhere.route("a", "a-page.tsx")];
+            export const otherRoutes = [helpers.route("b", "./pages/admin-b-page.tsx")];`,
+        },
+      }),
     ).toEqual([
-      "no-loose-files: features/auth/auth-routes.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
-      "reserved-suffixes: features/auth/pages/auth-login-page.tsx: *-page.tsx, *-redirect.tsx and *-layout.tsx are reserved for files declared in routes.ts → rename it, or route it",
+      "location: features/admin/admin-routes.ts: the routes declared through this relative() call are not checked → write const { route, index, layout } = relative(import.meta.dirname)",
+      "location: features/admin/admin-routes.ts: the routes declared through this relative() call are not checked → write const { route, index, layout } = relative(import.meta.dirname)",
     ]);
+  });
+});
+
+describe("computed route module paths", () => {
+  test("says a computed path is not checked; the module it names still looks unrouted", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}const PAGES = "features/game/pages";
+          const name = "game-page";
+          export default [route("a", PAGES + "/game-page.tsx"), route("b", \`features/game/pages/\${name}.tsx\`), route("c", \`features/game/pages/game-c-page.tsx\`)];`,
+        files: ["features/game/pages/game-page.tsx", "features/game/pages/game-c-page.tsx"],
+      }),
+    ).toEqual(
+      [
+        "location: routes.ts: a route module path is computed, so it is not checked → write it as a string literal",
+        "location: routes.ts: a route module path is computed, so it is not checked → write it as a string literal",
+        "reserved-suffixes: features/game/pages/game-page.tsx: *-page.tsx, *-redirect.tsx and *-layout.tsx are reserved for files declared in routes.ts → rename it, or route it",
+      ].sort(),
+    );
+  });
+});
+
+describe("aliases", () => {
+  test("follows the aliases of tsconfig.json paths, through extends, comments and trailing commas", () => {
+    expect(
+      lint({
+        routes: `import { gameRoutes } from "@/features/game/game-routes";
+          import { authRoutes } from "#auth-routes";
+          export default [...gameRoutes, ...authRoutes];`,
+        sources: {
+          "../tsconfig.json": `{
+            // the app's own config
+            "extends": "./tsconfig.paths",
+            "compilerOptions": { "strict": true, },
+          }`,
+          "../tsconfig.paths.json": `{ "compilerOptions": { /* aliases */ "paths": {
+            "@/*": ["./missing/*", "./src/*"],
+            "#auth-routes": ["./src/features/auth/auth-routes.ts"],
+          } } }`,
+          "features/game/game-routes.ts": `${ROUTES_IMPORT}export const gameRoutes = [route("g", "features/game/pages/game-page.tsx")];`,
+          "features/auth/auth-routes.ts": `${ROUTES_IMPORT}export const authRoutes = [route("l", "features/auth/pages/auth-login-page.tsx")];`,
+        },
+        files: ["features/game/pages/game-page.tsx", "features/auth/pages/auth-login-page.tsx"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("reads only route config files: a file without route helpers is not one, and what it imports is not read", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}import { ids } from "@/lib/route-ids";
+          import { gameIds } from "./features/game/game-ids";
+          export default [route(ids.game, "features/game/pages/game-page.tsx")];`,
+        sources: {
+          "../tsconfig.json": `{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }`,
+          "lib/route-ids.ts": `import { helper } from "@/features/game/game-helper";\nexport const ids = { game: helper };`,
+          "features/game/game-helper.ts": `import { other } from "~/unknown";\nexport const helper = "g";`,
+          "features/game/game-ids.ts": `export const gameIds = ["features/game/pages/game-old-page.tsx"];`,
+        },
+        files: ["features/game/pages/game-page.tsx", "features/game/pages/game-old-page.tsx"],
+      }),
+    ).toEqual(
+      [
+        "no-loose-files: features/game/game-helper.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
+        "no-loose-files: features/game/game-ids.ts: no loose file at a feature root → move it to a subfolder (components/, hooks/, lib/…)",
+        "reserved-suffixes: features/game/pages/game-old-page.tsx: *-page.tsx, *-redirect.tsx and *-layout.tsx are reserved for files declared in routes.ts → rename it, or route it",
+      ].sort(),
+    );
+  });
+
+  test("leaves packages alone: dependencies of package.json, node builtins and @react-router/*", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}import { join } from "node:path";
+          import { routeIds } from "@acme/route-ids/web";
+          import kit from "kit";
+          export default [route("g", "features/game/pages/game-page.tsx")];`,
+        sources: { "../package.json": JSON.stringify({ dependencies: { "@acme/route-ids": "1" }, devDependencies: { kit: "1" } }) },
+        files: ["features/game/pages/game-page.tsx"],
+      }),
+    ).toEqual([]);
   });
 });
 

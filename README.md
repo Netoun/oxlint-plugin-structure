@@ -74,15 +74,17 @@ The `StructureSettings` type describes `settings.structure`.
 ## React Router
 
 A **route module** is a file declared in the app's route config with `route()`, `layout()` or `index()`
-(any local name, inside `prefix()` too). The route config is `routes.ts` and every file it imports through
-a relative path (`./auth-routes`, `../shared/routes.js`, a folder's `index.ts`), inside the app's source
-folder: routes split across files are read like routes in one.
+(any local name, inside `prefix()` too), or with the helpers of `relative(import.meta.dirname)`, whose
+paths start from their file's folder. The route config is `routes.ts` and the files it imports that
+declare routes (they import `@react-router/dev/routes`) or only re-export them, inside the app's source
+folder, through a relative path (`./auth-routes`, a folder's `index.ts`) or an alias of the app's
+`tsconfig.json` `compilerOptions.paths` (`@/features/auth/auth-routes`).
 
 | Rule                                  | Checks                                                                 |
 | ------------------------------------- | ---------------------------------------------------------------------- |
 | `react-router-role-suffix`            | with child routes → `*-layout.tsx`; leaf → `*-page.tsx` or `*-redirect.tsx` |
 | `react-router-feature-prefix`         | the name starts with its feature: `features/game/…/game-room-page.tsx` |
-| `react-router-location`               | every route module lives in one place (see modes)                      |
+| `react-router-location`               | every route module lives in one place (see modes); reports what the rules cannot read (see Limits) |
 | `react-router-reserved-suffixes`      | `-page`, `-redirect`, `-layout` belong to routed files only            |
 | `react-router-no-loose-files`         | nothing else lives where route modules live, nor loose at a feature root |
 | `react-router-file-case`              | every file under `features/` is kebab-case: `game-card.tsx`, not `GameCard.tsx` |
@@ -130,10 +132,16 @@ turns a rule off silently.
 
 ### Limits
 
-- File-system routes (`flatRoutes()`) are reported once, on the config file that calls it, not checked.
-- Routes built from `relative()` or from computed paths are not seen.
-- Only relative imports are followed. A route config reached through an alias (`~/features/auth/auth-routes`)
-  is not read: its routes count as undeclared, so import it with a relative path.
+What the rules cannot read, `react-router-location` reports on the config file, with the fix:
+
+- file-system routes (`flatRoutes()`);
+- a computed route module path (`PAGES + "/game-page.tsx"`): write it as a string literal. Until then,
+  the module it names also looks unrouted to `react-router-reserved-suffixes`;
+- a `relative()` call other than `const { route, … } = relative(import.meta.dirname)`;
+- an import that is neither relative, nor a `paths` alias, nor a dependency of `package.json`
+  (an alias declared only in `vite.config`, for instance).
+
+A relative import that leaves the app's source folder is not read.
 
 ## Elysia and NestJS
 
