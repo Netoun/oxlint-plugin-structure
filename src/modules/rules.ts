@@ -3,6 +3,9 @@ import { basename, join, relative, resolve } from "node:path";
 import type { Rule, RuleContext } from "../eslint.js";
 import { nearestPackage } from "../package.js";
 import { readSection } from "../settings.js";
+import { ENTITY_LOCATION_DESCRIPTION, entityLocation } from "./entity-location.js";
+import { classNameRule } from "./class-name.js";
+import { roleVocabulary } from "./role-vocabulary.js";
 
 /**
  * Rules for API stacks organised in modules: `src/modules/<module>/<module>.module.ts`, role files
@@ -18,13 +21,15 @@ export type ModuleSettings = {
   testsFolder: string;
   /** A module's contracts folder: its files are named after the module. */
   contractsFolder: string;
-  /** File roles, named `<module>.<role>.ts`. */
+  /** File roles, named `<module>.<role>.ts`. Replaces the default list. */
   roles: readonly string[];
+  /** Roles added to `roles`, so a project names its own without relisting the defaults. */
+  extraRoles: readonly string[];
   /** Folders whose files are named after what they hold, not after the module (Nest `entities/`). */
   freeNameFolders: readonly string[];
 };
 
-type Stack = {
+export type Stack = {
   id: "elysia" | "nestjs";
   /** The dependency that marks a package as this stack's. */
   dependency: string;
@@ -32,7 +37,7 @@ type Stack = {
 };
 
 /** Where a file sits in its package's modules folder. */
-type ModuleFile = {
+export type ModuleFile = {
   /** Path shown in messages: `modules/<module>/…`. */
   path: string;
   /** Folders between the modules folder and the file; empty for a file loose in it. */
@@ -43,10 +48,12 @@ type ModuleFile = {
 };
 
 /** `teams` → `team`, `categories` → `category`: a module's files may use the singular. */
-const singular = (name: string) => name.replace(/ies$/, "y").replace(/s$/, "");
+export const singular = (name: string) => name.replace(/ies$/, "y").replace(/s$/, "");
 
-function moduleFile(stack: Stack, context: RuleContext): ModuleFile | null {
-  const settings = readSection(context.settings, stack.id, stack.defaults, ["roles"]);
+export function moduleFile(stack: Stack, context: RuleContext): ModuleFile | null {
+  const read = readSection(context.settings, stack.id, stack.defaults, ["roles"]);
+  // Every rule reads the roles from `roles`: the extra ones join it here.
+  const settings = { ...read, roles: [...read.roles, ...read.extraRoles] };
   const pkg = nearestPackage(context.filename);
   if (!pkg?.dependencies.has(stack.dependency)) return null;
   const modulesRoot = join(pkg.dir, settings.modulesDir);
@@ -70,7 +77,7 @@ function isPrefixed({ folders, name, settings }: ModuleFile): boolean {
     .some((prefix) => name.startsWith(`${prefix}.`) || name.startsWith(`${prefix}-`));
 }
 
-const roleOf = ({ name, settings }: ModuleFile) => settings.roles.find((role) => name.endsWith(`.${role}.ts`));
+export const roleOf = ({ name, settings }: ModuleFile) => settings.roles.find((role) => name.endsWith(`.${role}.ts`));
 
 /** A rule that runs `check` once per modules-folder file of the stack and reports what it returns. */
 function moduleFileRule(stack: Stack, description: string, check: (file: ModuleFile) => string | null): Rule {
@@ -134,6 +141,7 @@ const elysia: Stack = {
     testsFolder: "test",
     contractsFolder: "contracts",
     roles: ["module", "routes", "service", "contract", "macro", "guard"],
+    extraRoles: [],
     freeNameFolders: [],
   },
 };
@@ -145,7 +153,9 @@ const nestjs: Stack = {
     modulesDir: "src/modules",
     testsFolder: "test",
     contractsFolder: "contracts",
-    roles: ["module", "controller", "service", "mapper", "contract", "entity", "factory", "guard", "filter", "query", "seeder"],
+    roles: ["module", "controller", "service", "mapper", "contract", "entity", "factory", "guard", "filter", "query", "seeder",
+      "config", "cli", "client", "adapter", "handler", "port", "logic", "decorator", "middleware", "provider", "exception"],
+    extraRoles: [],
     freeNameFolders: ["entities", "utils"],
   },
 };
@@ -166,4 +176,9 @@ export const elysiaRules: Record<string, Rule> = {
   "elysia-contract-location": elysiaContractLocation,
 };
 
-export const nestjsRules: Record<string, Rule> = rulesFor(nestjs);
+export const nestjsRules: Record<string, Rule> = {
+  ...rulesFor(nestjs),
+  "nestjs-entity-location": moduleFileRule(nestjs, ENTITY_LOCATION_DESCRIPTION, entityLocation),
+  "nestjs-class-name": classNameRule(nestjs),
+  "nestjs-role-vocabulary": moduleFileRule(nestjs, roleVocabulary.description, roleVocabulary.check),
+};

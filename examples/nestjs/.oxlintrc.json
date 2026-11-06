@@ -2,6 +2,9 @@
   "jsPlugins": ["@netoun/oxlint-plugin-structure"],
   "rules": {
     "structure/nestjs-role-prefix": "error",
-    "structure/nestjs-module-entry": "error"
+    "structure/nestjs-module-entry": "error",
+    "structure/nestjs-entity-location": "error",
+    "structure/nestjs-class-name": "error",
+    "structure/nestjs-role-vocabulary": "error"
   }
 }

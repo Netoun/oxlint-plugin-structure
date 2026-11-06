@@ -37,6 +37,9 @@ export const RECOMMENDED: readonly string[] = [
   "elysia-contract-location",
   "nestjs-role-prefix",
   "nestjs-module-entry",
+  "nestjs-entity-location",
+  "nestjs-class-name",
+  "nestjs-role-vocabulary",
 ];
 
 const plugin: Plugin = {

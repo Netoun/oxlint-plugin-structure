@@ -204,6 +204,9 @@ src/modules/billing/invoicing.service.ts:1:1: error structure(nestjs-role-prefix
 | `*-module-entry`           | every folder of `src/modules/` has its `<module>.module.ts`; no file sits loose in `src/modules/` |
 | `*-file-prefix`            | every other file of a module starts with the module's name (noisy, see above) |
 | `elysia-contract-location` | a module's contracts live in `contracts/`; a sub-feature's may sit beside its routes |
+| `nestjs-entity-location`   | a module or sub-feature keeps one entity at its root; several, or one beside an `entities/` folder, move to `entities/`. Only a file that declares one (`@Entity(`, `@Embeddable(`) counts: a root `auth.entity.ts` that re-exports `entities/` passes |
+| `nestjs-class-name`        | a role file's exported class is named after it: `browsing-cover-link.service.ts` holds `BrowsingCoverLinkService`, `posts.service.ts` may hold `PostService`, an entity drops the role (`comment.entity.ts` holds `Comment`). Factories, contracts and files that declare no class are skipped |
+| `nestjs-role-vocabulary`   | the segment between a file's last two dots is a role; a topic takes a hyphen: `auth.cookie-domain.ts` → `auth-cookie-domain.ts`, `auth.session-guard.ts` → `auth-session.guard.ts`. Skips test files. NestJS only: Elysia apps write dotted topics on purpose |
 
 NestJS also allows `<module>.contract.ts` at the module root, and names `entities/` and `utils/` files
 after what they hold, so it has no contract rule and skips those folders.
@@ -217,7 +220,8 @@ after what they hold, so it has no contract rule and skips those folders.
 | `modulesDir`      | `"src/modules"`                                       | same           |
 | `testsFolder`     | `"test"`: cross-module tests, no rule looks inside    | same           |
 | `contractsFolder` | `"contracts"`                                         | same           |
-| `roles`           | `module routes service contract macro guard`          | `module controller service mapper contract entity factory guard filter query seeder` |
+| `roles`           | `module routes service contract macro guard`          | `module controller service mapper contract entity factory guard filter query seeder config cli client adapter handler port logic decorator middleware provider exception` |
+| `extraRoles`      | none: roles added to `roles` (`session-guard`), the defaults kept | same |
 | `freeNameFolders` | none                                                  | `entities utils` |
 
 ## Adopting it on an existing repo

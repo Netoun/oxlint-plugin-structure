@@ -13,6 +13,9 @@
     "structure/elysia-module-entry": "error",
     "structure/elysia-contract-location": "error",
     "structure/nestjs-role-prefix": "error",
-    "structure/nestjs-module-entry": "error"
+    "structure/nestjs-module-entry": "error",
+    "structure/nestjs-entity-location": "error",
+    "structure/nestjs-class-name": "error",
+    "structure/nestjs-role-vocabulary": "error"
   }
 }
