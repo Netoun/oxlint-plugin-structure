@@ -56,6 +56,7 @@ bun add -d @netoun/oxlint-plugin-structure
     "structure/react-router-reserved-suffixes": "error",
     "structure/react-router-no-loose-files": "error",
     "structure/react-router-file-case": "error",
+    "structure/react-router-folder-contents": "error",
 
     "structure/elysia-role-prefix": "error",
     "structure/elysia-module-entry": "error",
@@ -86,6 +87,7 @@ A **route module** is a file declared in the app's `routes.ts` with `route()`, `
 | `react-router-reserved-suffixes`      | `-page`, `-redirect`, `-layout` belong to routed files only            |
 | `react-router-no-loose-files`         | nothing else lives where route modules live, nor loose at a feature root |
 | `react-router-file-case`              | every file under `features/` is kebab-case: `game-card.tsx`, not `GameCard.tsx` |
+| `react-router-folder-contents`        | `hooks/` holds `use-*` files, `components/` holds `.tsx`, `lib/` and `utils/` hold no component |
 
 Resource routes (`.ts`, no component) skip the suffix and prefix rules. The first three rules report
 on the path string in `routes.ts`; the others report on the offending file.

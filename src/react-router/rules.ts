@@ -265,6 +265,61 @@ const fileCase: Rule = {
   },
 };
 
+const CONTENT_FOLDERS = ["hooks", "components", "lib", "utils"] as const;
+type ContentFolder = (typeof CONTENT_FOLDERS)[number];
+const isContentFolder = (name: string): name is ContentFolder => CONTENT_FOLDERS.some((folder) => folder === name);
+
+/** The nearest hooks/components/lib/utils folder `dir` sits in. A feature named `hooks` is not one. */
+function contentFolder(dir: string, settings: ReactRouterSettings): ContentFolder | undefined {
+  const segments = dir.split("/");
+  let found: ContentFolder | undefined;
+  segments.forEach((segment, index) => {
+    const isFeatureName = segments[index - 1] === settings.featuresDir;
+    if (segment !== settings.featuresDir && !isFeatureName && isContentFolder(segment)) found = segment;
+  });
+  return found;
+}
+
+/** What is wrong with `name` in `folder`, with where it goes; null when it belongs there. */
+function contentsProblem(folder: ContentFolder, name: string): string | null {
+  const extension = extname(name);
+  const isComponent = COMPONENT_EXTENSIONS.has(extension);
+  switch (folder) {
+    case "hooks":
+      return name.startsWith("use-") ? null : `hooks/ holds hooks → name it use-…${extension}, or move it to lib/`;
+    case "components":
+      return isComponent
+        ? null
+        : `components/ holds components (.tsx) → move it to ${name.startsWith("use-") ? "hooks/" : "lib/"}`;
+    case "lib":
+    case "utils":
+      return isComponent ? `${folder}/ holds no component → move it to components/` : null;
+  }
+}
+
+const folderContents: Rule = {
+  meta: {
+    type: "problem",
+    docs: { description: "hooks/ holds use-* files, components/ holds .tsx, lib/ and utils/ hold no component." },
+    schema: [],
+  },
+  create(context) {
+    const settings = readSettings(context.settings);
+    const app = findRouterApp(context.filename);
+    if (!app) return {};
+    const file = appPath(app, context.filename);
+    if (!file.startsWith(`${settings.featuresDir}/`) || isTest(file)) return {};
+    const folder = contentFolder(dirname(file), settings);
+    const problem = folder === undefined ? null : contentsProblem(folder, basename(file));
+    if (problem === null) return {};
+    return {
+      Program(node) {
+        context.report({ node, message: `${file}: ${problem}` });
+      },
+    };
+  },
+};
+
 export const reactRouterRules: Record<string, Rule> = {
   "react-router-role-suffix": roleSuffix,
   "react-router-feature-prefix": featurePrefix,
@@ -272,4 +327,5 @@ export const reactRouterRules: Record<string, Rule> = {
   "react-router-reserved-suffixes": reservedSuffixes,
   "react-router-no-loose-files": noLooseFiles,
   "react-router-file-case": fileCase,
+  "react-router-folder-contents": folderContents,
 };

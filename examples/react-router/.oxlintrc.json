@@ -11,6 +11,7 @@
     "structure/react-router-location": "error",
     "structure/react-router-reserved-suffixes": "error",
     "structure/react-router-no-loose-files": "error",
-    "structure/react-router-file-case": "error"
+    "structure/react-router-file-case": "error",
+    "structure/react-router-folder-contents": "error"
   }
 }

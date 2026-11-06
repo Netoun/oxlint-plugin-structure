@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { EMPTY_MODULE, lintFixture } from "./oxlint.js";
 
-const RULES = ["role-suffix", "feature-prefix", "location", "reserved-suffixes", "no-loose-files", "file-case"].map(
-  (rule) => `react-router-${rule}`,
-);
+const RULES = [
+  "role-suffix",
+  "feature-prefix",
+  "location",
+  "reserved-suffixes",
+  "no-loose-files",
+  "file-case",
+  "folder-contents",
+].map((rule) => `react-router-${rule}`);
 
 type Project = {
   settings?: Record<string, unknown>;
@@ -199,6 +205,65 @@ describe("app detection", () => {
   });
 });
 
+describe("folder contents", () => {
+  test("passes hooks named use-*, components in .tsx, and no component in lib/ or utils/", () => {
+    expect(
+      lint({
+        routes: `${ROUTES_IMPORT}export default [route("h", "features/hooks/pages/hooks-page.tsx")];`,
+        files: [
+          "features/hooks/pages/hooks-page.tsx",
+          "features/game/hooks/use-game.ts",
+          "features/game/hooks/game-queries.test.ts",
+          "features/game/components/game-card.tsx",
+          "features/game/components/hooks/use-card-state.ts",
+          "features/game/lib/game-queries.ts",
+          "features/game/utils/game-format.ts",
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  test("reports what does not belong to its folder, with where it goes", () => {
+    expect(
+      lint({
+        routes: ROUTES_IMPORT,
+        files: [
+          "features/game/hooks/score-query-keys.ts",
+          "features/game/hooks/forms/form-state.ts",
+          "features/game/components/game-detail.types.ts",
+          "features/game/components/use-game-detail.ts",
+          "features/game/lib/user-card.tsx",
+          "features/game/utils/user-badge.tsx",
+        ],
+      }),
+    ).toEqual(
+      [
+        "folder-contents: features/game/hooks/score-query-keys.ts: hooks/ holds hooks → name it use-….ts, or move it to lib/",
+        "folder-contents: features/game/hooks/forms/form-state.ts: hooks/ holds hooks → name it use-….ts, or move it to lib/",
+        "folder-contents: features/game/components/game-detail.types.ts: components/ holds components (.tsx) → move it to lib/",
+        "folder-contents: features/game/components/use-game-detail.ts: components/ holds components (.tsx) → move it to hooks/",
+        "folder-contents: features/game/lib/user-card.tsx: lib/ holds no component → move it to components/",
+        "folder-contents: features/game/utils/user-badge.tsx: utils/ holds no component → move it to components/",
+      ].sort(),
+    );
+  });
+
+  test("leaves alone what is outside features/ and what is not a React Router app", () => {
+    expect(lint({ routes: ROUTES_IMPORT, files: ["hooks/game-queries.ts"] })).toEqual([]);
+    expect(lint({ reactRouter: false, files: ["features/game/hooks/game-queries.ts"] })).toEqual([]);
+  });
+
+  test("follows featuresDir", () => {
+    expect(
+      lint({
+        settings: { featuresDir: "modules" },
+        routes: ROUTES_IMPORT,
+        files: ["modules/app/hooks/app-queries.ts", "features/app/hooks/app-queries.ts"],
+      }),
+    ).toEqual(["folder-contents: modules/app/hooks/app-queries.ts: hooks/ holds hooks → name it use-….ts, or move it to lib/"]);
+  });
+});
+
 describe("file case", () => {
   test("asks for kebab-case anywhere under features/: route modules, tests and every subfolder", () => {
     expect(
@@ -210,7 +275,7 @@ describe("file case", () => {
           "features/game/components/GameCard.tsx",
           "features/game/components/GameCard.test.tsx",
           "features/game/components/game_card.tsx",
-          "features/game/hooks/useGame.ts",
+          "features/game/lib/useGame.ts",
           "features/game/lib/HTMLParser.ts",
         ],
       }),
@@ -220,7 +285,7 @@ describe("file case", () => {
         "file-case: features/game/components/GameCard.tsx: the name is not kebab-case → rename it game-card.tsx",
         "file-case: features/game/components/GameCard.test.tsx: the name is not kebab-case → rename it game-card.test.tsx",
         "file-case: features/game/components/game_card.tsx: the name is not kebab-case → rename it game-card.tsx",
-        "file-case: features/game/hooks/useGame.ts: the name is not kebab-case → rename it use-game.ts",
+        "file-case: features/game/lib/useGame.ts: the name is not kebab-case → rename it use-game.ts",
         "file-case: features/game/lib/HTMLParser.ts: the name is not kebab-case → rename it html-parser.ts",
       ].sort(),
     );
