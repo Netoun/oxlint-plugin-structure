@@ -1,0 +1,62 @@
+name: Release
+
+# A pushed v* tag is the release. `bun run release <increment>` creates and pushes it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # GitHub release
+      id-token: write # npm trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the main-ancestry check and the release notes read history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+
+      - name: Tag matches package.json and sits on main
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but package.json is v$version → tag the release commit"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main → release from main"
+            exit 1
+          fi
+
+      - run: bun run build
+
+      # npm rather than bun publish: trusted publishing needs npm >= 11.5.1.
+      - run: npm install --global npm@11
+      - name: Publish to npm
+        # verify already ran the checks on this commit. A prerelease goes to `next`, never `latest`.
+        run: npm publish --ignore-scripts --tag "$([[ "$GITHUB_REF_NAME" == *-* ]] && echo next || echo latest)"
+        env:
+          # Bootstrap only: npm trusts this workflow once the package exists. OIDC wins when configured.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: GitHub release
+        run: |
+          previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          git log --format='- %s' "${previous:+$previous..}$GITHUB_REF_NAME" | grep -v '^- chore: release' > notes.md || true
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md \
+            $([[ "$GITHUB_REF_NAME" == *-* ]] && echo --prerelease)
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -36,10 +36,36 @@ The full checklist, and the invariants every rule keeps, are in [`AGENTS.md`](./
 
 ## Releasing
 
-Maintainer only.
+Maintainer only. Pushing a `v*` tag is the release: CI publishes it to npm.
 
-1. Bump `version` in `package.json` (semver: a new rule is a minor, a rule that reports more on the
-   same code is a major for its users).
-2. `git commit -m "chore: release vX.Y.Z" && git tag vX.Y.Z`
-3. `bun publish --access public` (`prepublishOnly` runs typecheck and tests).
-4. `git push --follow-tags`
+```bash
+bun run release minor   # patch | minor | major | prerelease --preid beta | 1.2.3
+```
+
+Semver for its users: a new rule is a minor, a rule that reports more on the same code is a major.
+
+`scripts/release.ts` refuses to run off `main`, with uncommitted changes or behind `origin/main`, runs
+typecheck, lint and tests, then bumps `package.json`, commits `chore: release vX.Y.Z`, tags `vX.Y.Z`
+and pushes both. `.github/workflows/release.yml` reruns CI on the tag, checks the tag matches
+`package.json` and sits on `main`, publishes to npm (a prerelease goes to the `next` dist-tag) and
+opens a GitHub release listing the commits since the previous tag.
+
+A failure before the publish step publishes nothing: re-run the workflow if the cause was transient,
+otherwise fix on `main` and release the next patch (a pushed tag stays). If only the GitHub release
+step failed, the package is live: create the release by hand with `gh release create vX.Y.Z`.
+
+### One-time npm setup
+
+npm trusts a workflow only for a package that already exists, so the first version needs a token:
+
+1. Check that `npm whoami` prints `netoun`: the `@netoun` scope must be yours, or the publish 404s.
+2. On npmjs.com, create a granular access token with read and write on all packages (the package does
+   not exist yet) and "bypass 2FA" so CI can publish. Add it as the repository secret `NPM_TOKEN`.
+3. Release the first version. `package.json` already says 0.1.0, so once this release setup is on
+   `main`, tag it as is: `git tag -a v0.1.0 -m v0.1.0 && git push --atomic origin main v0.1.0`.
+4. On the package's npm settings page, add a trusted publisher: GitHub Actions, `Netoun` /
+   `oxlint-plugin-structure` / `release.yml`. Then set publishing access to "disallow tokens" and
+   delete the `NPM_TOKEN` secret.
+
+npm attaches provenance only to packages published from a public repository. It turns on by itself
+once this repository is public.

@@ -41,5 +41,7 @@ dry-run.
 ## Conventions
 
 - Bun only. Conventional commits (`feat:`, `fix:`, `docs:`…), one scope per change.
-- `bun publish` runs only on an explicit request from the maintainer: publishing is public and permanent.
+- Releasing runs only on an explicit request from the maintainer: publishing is public and permanent.
+  A pushed `v*` tag publishes to npm through CI, so never push one, run `bun run release` or
+  `bun publish` unasked.
 - Process for humans, releases included: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
