@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { staticString, type AstNode, type ExportDeclaration, type ImportDeclaration, type Rule, type Visitor } from "../eslint.js";
 import { appPath, findRouterApp, resolveImportPath, type RouterApp } from "./app.js";
 import { readSettings, type ReactRouterSettings } from "./settings.js";
@@ -9,7 +9,11 @@ import { readSettings, type ReactRouterSettings } from "./settings.js";
  * understood alone. Only the side with fewer imports is reported, once per file it imports: it is the
  * cheaper side to fix. An import counts as a distinct (file, imported file) pair, tests left out on both
  * sides. Telling the cycle requires the other feature's imports, so the rule reads the files of the
- * features involved, each cached until its mtime changes.
+ * features involved once and keeps what they import. A file is read again when it is linted and has
+ * changed, when a folder of its feature changes (a file added, removed or saved through a rename), or
+ * when tsconfig.json changes. So an edit made in place, outside the editor, to another feature's file
+ * shows once that file is linted or its folder changes: checking every file of both features for each
+ * linted file cost a stat per file of the two features, for every file.
  */
 
 type ImportExpression = AstNode & { type: "ImportExpression"; source: AstNode };
@@ -27,20 +31,17 @@ const MODULE_SPECIFIER = /\b(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["'
 
 function mtimeOf(path: string): number | null {
   try {
-    return statSync(path).mtimeMs;
+    return statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? null;
   } catch {
     return null;
   }
 }
 
-/** Where a file's imports lead inside the app's source folder, as app paths. Cached by mtime. */
-const importsByFile = new Map<string, { mtime: number; tsconfig: number | null; targets: readonly string[] }>();
+/** Where a file's imports lead inside the app's source folder, as app paths, read at `mtime`. */
+type Imports = { mtime: number; tsconfig: number | null; targets: readonly string[] };
+const importsByFile = new Map<string, Imports>();
 
-function importsOf(app: RouterApp, file: string, tsconfig: number | null): readonly string[] {
-  const mtime = mtimeOf(file);
-  if (mtime === null) return [];
-  const cached = importsByFile.get(file);
-  if (cached?.mtime === mtime && cached.tsconfig === tsconfig) return cached.targets;
+function readImports(app: RouterApp, file: string, mtime: number, tsconfig: number | null): Imports {
   const targets = new Set<string>();
   const text = readFileSync(file, "utf8").replace(COMMENT, "");
   for (const match of text.matchAll(MODULE_SPECIFIER)) {
@@ -49,15 +50,25 @@ function importsOf(app: RouterApp, file: string, tsconfig: number | null): reado
   }
   const entry = { mtime, tsconfig, targets: [...targets] };
   importsByFile.set(file, entry);
-  return entry.targets;
+  return entry;
 }
 
-/** The source files of a feature folder, tests left out. Cached until a folder in it changes. */
-const filesByFeature = new Map<string, { dirs: ReadonlyMap<string, number | null>; files: readonly string[] }>();
+/** The imports of `file` as it is on disk now, and whether they differ from the ones read before. */
+function freshImports(app: RouterApp, file: string, tsconfig: number | null): { targets: readonly string[]; changed: boolean } {
+  const mtime = mtimeOf(file);
+  const cached = importsByFile.get(file);
+  if (mtime === null) {
+    importsByFile.delete(file);
+    return { targets: [], changed: cached !== undefined };
+  }
+  if (cached?.mtime === mtime && cached.tsconfig === tsconfig) return { targets: cached.targets, changed: false };
+  const { targets } = readImports(app, file, mtime, tsconfig);
+  const same = cached !== undefined && cached.targets.length === targets.length && cached.targets.every((target, index) => targets[index] === target);
+  return { targets, changed: !same };
+}
 
-function featureFiles(featureDir: string): readonly string[] {
-  const cached = filesByFeature.get(featureDir);
-  if (cached && [...cached.dirs].every(([dir, mtime]) => mtimeOf(dir) === mtime)) return cached.files;
+/** The folders of a feature with their mtimes, and its source files, tests left out. */
+function walkFeature(featureDir: string): { dirs: ReadonlyMap<string, number | null>; files: readonly string[] } {
   const dirs = new Map<string, number | null>();
   const files: string[] = [];
   const walk = (dir: string) => {
@@ -75,14 +86,54 @@ function featureFiles(featureDir: string): readonly string[] {
     }
   };
   walk(featureDir);
-  filesByFeature.set(featureDir, { dirs, files });
-  return files;
+  return { dirs, files };
+}
+
+/**
+ * Per feature folder: its folders and files, and how many distinct (file, imported file) pairs go into
+ * each other feature. `counts` is null when one of its files changed: counted again from `importsByFile`.
+ */
+type Feature = {
+  dirs: ReadonlyMap<string, number | null>;
+  files: readonly string[];
+  counts: ReadonlyMap<string, number> | null;
+  tsconfig: number | null;
+};
+const featuresByDir = new Map<string, Feature>();
+
+/** The feature's imports into each other feature. Checks its folders, not each of its files. */
+function outgoing(app: RouterApp, featureDir: string, name: string, tsconfig: number | null, settings: ReactRouterSettings): ReadonlyMap<string, number> {
+  let feature = featuresByDir.get(featureDir);
+  const changedDirs = feature === undefined ? [] : [...feature.dirs].filter(([dir, mtime]) => mtimeOf(dir) !== mtime).map(([dir]) => dir);
+  if (feature === undefined || changedDirs.length > 0) {
+    const walked = walkFeature(featureDir);
+    // A folder changes when a file in it is added, removed or saved through a rename: its files are read again.
+    for (const file of walked.files) if (changedDirs.includes(dirname(file))) freshImports(app, file, tsconfig);
+    feature = { ...walked, counts: null, tsconfig };
+    featuresByDir.set(featureDir, feature);
+  }
+  if (feature.counts !== null && feature.tsconfig === tsconfig) return feature.counts;
+  const counts = new Map<string, number>();
+  for (const source of feature.files) {
+    const cached = importsByFile.get(source);
+    const targets = cached?.tsconfig === tsconfig ? cached.targets : freshImports(app, source, tsconfig).targets;
+    for (const target of targets) {
+      const into = featureOf(target, settings);
+      if (into !== null && into !== name && !isTest(target)) counts.set(into, (counts.get(into) ?? 0) + 1);
+    }
+  }
+  feature.counts = counts;
+  feature.tsconfig = tsconfig;
+  return counts;
 }
 
 /** The feature an app path belongs to: `features/<feature>/…`; null for a file loose in `features/` or outside. */
 function featureOf(path: string, settings: ReactRouterSettings): string | null {
-  const segments = path.split("/");
-  return segments.length > 2 && segments[0] === settings.featuresDir ? (segments[1] ?? null) : null;
+  // Called for every import of every file of the features a file's imports reach: no split.
+  const start = settings.featuresDir.length + 1;
+  if (!path.startsWith(`${settings.featuresDir}/`)) return null;
+  const end = path.indexOf("/", start);
+  return end === -1 ? null : path.slice(start, end);
 }
 
 const plural = (count: number) => `${count} import${count === 1 ? "" : "s"}`;
@@ -106,29 +157,23 @@ const featureCycles: Rule = {
 
     const tsconfig = mtimeOf(join(app.root, "tsconfig.json"));
     const featuresRoot = join(app.srcDir, settings.featuresDir);
-    /** Per feature: target feature → distinct (file, target file) pairs into it. Read once per linted file. */
-    const outgoing = new Map<string, Map<string, number>>();
+    // This file's imports are read the way every file is, so both sides are counted alike, and the AST is
+    // only walked, to find the import to report on, when one of them is on a cycle's minority side.
+    const filename = resolve(context.filename);
+    const own = freshImports(app, filename, tsconfig);
+    const ownFeature = featuresByDir.get(join(featuresRoot, feature));
+    if (own.changed && ownFeature !== undefined) ownFeature.counts = null;
+    /** Per feature, its imports into the others: its folders checked once for this file. */
+    const counted = new Map<string, ReadonlyMap<string, number>>();
     const importCount = (from: string, to: string) => {
-      let counts = outgoing.get(from);
-      if (counts === undefined) {
-        counts = new Map();
-        for (const source of featureFiles(join(featuresRoot, from))) {
-          for (const target of importsOf(app, source, tsconfig)) {
-            const into = featureOf(target, settings);
-            if (into !== null && into !== from && !isTest(target)) counts.set(into, (counts.get(into) ?? 0) + 1);
-          }
-        }
-        outgoing.set(from, counts);
-      }
+      let counts = counted.get(from);
+      if (counts === undefined) counted.set(from, (counts = outgoing(app, join(featuresRoot, from), from, tsconfig, settings)));
       return counts.get(to) ?? 0;
     };
-    // This file's imports are read the way the index reads every file, so both sides are counted alike, and
-    // the AST is only walked, to find the import to report on, when one of them is on a cycle's minority side.
-    const filename = resolve(context.filename);
     const dir = settings.featuresDir;
     /** Target app path → message, for each import to report. */
     const due = new Map<string, string>();
-    for (const target of importsOf(app, filename, tsconfig)) {
+    for (const target of own.targets) {
       const other = featureOf(target, settings);
       if (other === null || other === feature || settings.sharedFeatures.includes(other) || isTest(target)) continue;
       const theirs = importCount(other, feature);
