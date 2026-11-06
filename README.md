@@ -43,36 +43,33 @@ bun add -d @netoun/oxlint-plugin-structure
 ```jsonc
 // .oxlintrc.json
 {
-  "jsPlugins": ["@netoun/oxlint-plugin-structure"],
+  "extends": ["./node_modules/@netoun/oxlint-plugin-structure/recommended.json"],
   "settings": {
     "structure": {
       "react-router": { "mode": "pages" }
     }
-  },
-  "rules": {
-    "structure/react-router-role-suffix": "error",
-    "structure/react-router-feature-prefix": "error",
-    "structure/react-router-location": "error",
-    "structure/react-router-reserved-suffixes": "error",
-    "structure/react-router-no-loose-files": "error",
-    "structure/react-router-file-case": "error",
-    "structure/react-router-folder-contents": "error",
-
-    "structure/elysia-role-prefix": "error",
-    "structure/elysia-module-entry": "error",
-    "structure/elysia-contract-location": "error",
-
-    "structure/nestjs-role-prefix": "error",
-    "structure/nestjs-module-entry": "error"
   }
 }
 ```
 
-Keep the rules of the stacks you use. `elysia-file-prefix` and `nestjs-file-prefix` are left out
-above on purpose: they check every file of a module and run noisy on existing code; turn them on for
-a new project or once the other rules are green.
+`recommended.json` turns on every rule except `elysia-file-prefix` and `nestjs-file-prefix`, which
+check every file of a module and run noisy on existing code: add them to your `rules` for a new
+project or once the others are green. Each rule stays silent outside its stack, so the preset is safe in
+any repo, monorepos included. The `extends` path is relative to your config file: point it at the
+`node_modules` the plugin is installed in. A rule set in your own `rules` wins over the preset.
 
-ESLint flat config: `plugins: { structure }` with the same `settings` and `rules`.
+ESLint flat config:
+
+```js
+import structure from "@netoun/oxlint-plugin-structure";
+
+export default [
+  structure.configs.recommended,
+  { settings: { structure: { "react-router": { mode: "pages" } } } },
+];
+```
+
+The `StructureSettings` type describes `settings.structure`.
 
 ## React Router
 
@@ -196,7 +193,7 @@ after what they hold, so it has no contract rule and skips those folders.
 
 A repo grown without the convention starts red: each hit is a file to rename or move.
 
-1. Turn on the rules of the [Install](#install) config, without `*-file-prefix`.
+1. Extend `recommended.json` as in [Install](#install): it leaves `*-file-prefix` out.
 2. Run `oxlint .` and fix what it reports, one stack at a time. The settings name your folders and
    roles (`modulesDir`, `roles`, `featuresDir`…); there is no ignore list for files.
 3. When the rest is green, turn on `elysia-file-prefix` or `nestjs-file-prefix`: it checks every file

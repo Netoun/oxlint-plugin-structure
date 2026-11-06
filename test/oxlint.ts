@@ -17,10 +17,12 @@ export type Fixture = {
   structure?: Record<string, unknown> | undefined;
   /** Rule names without the `structure/` prefix, all turned on at "error". */
   rules: readonly string[];
+  /** A config file the lint config extends, instead of loading the plugin itself. */
+  extend?: string;
 };
 
 /** Lints a throwaway project with the built plugin; returns `rule: message` lines, sorted. Throws on a plugin crash. */
-export function lintFixture({ files, structure, rules }: Fixture): string[] {
+export function lintFixture({ files, structure, rules, extend }: Fixture): string[] {
   const dir = mkdtempSync(join(tmpdir(), "structure-"));
   const write = (path: string, text: string) => {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
@@ -30,7 +32,7 @@ export function lintFixture({ files, structure, rules }: Fixture): string[] {
     write(
       ".oxlintrc.json",
       JSON.stringify({
-        jsPlugins: [PLUGIN],
+        ...(extend === undefined ? { jsPlugins: [PLUGIN] } : { extends: [extend] }),
         settings: structure ? { structure } : {},
         rules: Object.fromEntries(rules.map((rule) => [`structure/${rule}`, "error"])),
       }),
