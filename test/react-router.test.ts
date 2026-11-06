@@ -681,3 +681,445 @@ describe("settings", () => {
     expect(() => lint({ settings: { mode: "nested" }, routes: ROUTES_IMPORT, files: ["features/a/pages/a-page.tsx"] })).toThrow(/structure settings\["react-router"\]: mode must be "pages" or "flat"/);
   });
 });
+
+describe("react-router-shared-imports", () => {
+  /** Lints `apps/web` with only this rule on; `sources` as in `lint()`, `routes` defaults to a file declaring none. */
+  function lintShared({ settings, routes = ROUTES_IMPORT, sources = {}, reactRouter = true }: Project): string[] {
+    const tree: Record<string, string> = { "apps/web/src/routes.ts": routes };
+    if (reactRouter) tree["apps/web/react-router.config.ts"] = 'export default { appDirectory: "src" };\n';
+    for (const [file, text] of Object.entries(sources)) tree[`apps/web/src/${file}`] = text;
+    const structure = settings ? { "react-router": settings } : undefined;
+    return lintFixture({ files: tree, structure, rules: ["react-router-shared-imports"] }).map((line) =>
+      line.replace(/^react-router-/, ""),
+    );
+  }
+
+  const TSCONFIG = `{
+    // the app's aliases
+    "compilerOptions": { "paths": { "@/*": ["./src/*"], "@ui/*": ["../../packages/ui/*"], }, },
+  }`;
+  const fix = (feature: string) => `→ move it into ${feature}, or move what it imports out of the feature`;
+
+  test("passes shared code that imports shared code and packages, and features that import shared code", () => {
+    expect(
+      lintShared({
+        sources: {
+          "../tsconfig.json": TSCONFIG,
+          "lib/cn.ts": EMPTY_MODULE,
+          "components/button.tsx": `import { cn } from "../lib/cn";\nimport { z } from "zod";\nimport { Card } from "@ui/card";\nimport "./button.css";\n`,
+          "features/game/components/game-card.tsx": `import { cn } from "@/lib/cn";\nimport { Button } from "../../../components/button";\n`,
+          "features/game/hooks/use-game.ts": `import { score } from "../lib/score";\n`,
+          "features/game/lib/score.ts": EMPTY_MODULE,
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  test("reports each import of a feature: relative, aliased, type-only, re-exported or dynamic, in tests too", () => {
+    expect(
+      lintShared({
+        sources: {
+          "../tsconfig.json": TSCONFIG,
+          "components/document-upload-form.tsx": `import type { Document } from "@/features/document/schemas/document.schema";
+            import { documentSchema } from "../features/document/schemas/document.schema.ts";`,
+          "hooks/use-auth.ts": `import { useAuthSession } from "@/features/auth/hooks/use-auth-session.js";`,
+          "lib/game.ts": `export { useGame } from "@/features/game/hooks/use-game";
+            export * from "@/features/game/lib/score";
+            export const loadCard = () => import("@/features/game/components/game-card");`,
+          "lib/cn.test.ts": `import { score } from "@/features/game/lib/score";`,
+          "features/document/schemas/document.schema.ts": EMPTY_MODULE,
+          "features/auth/hooks/use-auth-session.ts": EMPTY_MODULE,
+          "features/game/hooks/use-game.ts": EMPTY_MODULE,
+          "features/game/lib/score.ts": EMPTY_MODULE,
+          "features/game/components/game-card.tsx": EMPTY_MODULE,
+        },
+      }),
+    ).toEqual(
+      [
+        `shared-imports: components/document-upload-form.tsx: shared code imports features/document/schemas/document.schema.ts ${fix("features/document")}`,
+        `shared-imports: components/document-upload-form.tsx: shared code imports features/document/schemas/document.schema.ts ${fix("features/document")}`,
+        `shared-imports: hooks/use-auth.ts: shared code imports features/auth/hooks/use-auth-session.ts ${fix("features/auth")}`,
+        `shared-imports: lib/game.ts: shared code imports features/game/hooks/use-game.ts ${fix("features/game")}`,
+        `shared-imports: lib/game.ts: shared code imports features/game/lib/score.ts ${fix("features/game")}`,
+        `shared-imports: lib/game.ts: shared code imports features/game/components/game-card.tsx ${fix("features/game")}`,
+        `shared-imports: lib/cn.test.ts: shared code imports features/game/lib/score.ts ${fix("features/game")}`,
+      ].sort(),
+    );
+  });
+
+  test("names the innermost feature, and a file loose in features/", () => {
+    expect(
+      lintShared({
+        sources: {
+          "lib/price.ts": `import { plans } from "../features/billing/features/pricing/lib/plans";
+            import { helper } from "../features/helpers";`,
+          "features/billing/features/pricing/lib/plans.ts": EMPTY_MODULE,
+          "features/helpers.ts": EMPTY_MODULE,
+        },
+      }),
+    ).toEqual([
+      `shared-imports: lib/price.ts: shared code imports features/billing/features/pricing/lib/plans.ts ${fix("features/billing/features/pricing")}`,
+      "shared-imports: lib/price.ts: shared code imports features/helpers.ts → move what it imports out of features/",
+    ]);
+  });
+
+  test("leaves alone route modules, route config files, root.tsx and entry.*, their tests, and files out of the source folder", () => {
+    const importGame = (from: string) => `import { useGame } from "${from}/features/game/hooks/use-game";\n`;
+    expect(
+      lintShared({
+        routes: `${ROUTES_IMPORT}import { gameRoutes } from "./features/game/game-routes";
+          import { adminRoutes } from "./routes/admin-routes";
+          export default [route("legacy", "routes/legacy-page.tsx"), ...gameRoutes, ...adminRoutes];`,
+        sources: {
+          "routes/admin-routes.ts": `${ROUTES_IMPORT}${importGame("..")}export const adminRoutes = [route("admin", "routes/admin-page.tsx")];`,
+          "routes/admin-page.tsx": importGame(".."),
+          "routes/legacy-page.tsx": importGame(".."),
+          "routes/legacy-page.test.tsx": importGame(".."),
+          "root.tsx": importGame("."),
+          "root.test.tsx": importGame("."),
+          "entry.client.tsx": importGame("."),
+          "entry.server.tsx": importGame("."),
+          "../tests/game.test.ts": importGame("../src"),
+          "features/game/game-routes.ts": `${ROUTES_IMPORT}export const gameRoutes = [];`,
+          "features/game/hooks/use-game.ts": EMPTY_MODULE,
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  const gameImport = {
+    "lib/game.ts": `import { useGame } from "../features/game/hooks/use-game";\n`,
+    "features/game/hooks/use-game.ts": EMPTY_MODULE,
+  };
+
+  test("stays silent with file-system routes, whose route modules it cannot tell", () => {
+    const flatRoutes = `import { flatRoutes } from "@react-router/fs-routes";\nexport default flatRoutes();`;
+    expect(lintShared({ sources: gameImport })).toEqual([
+      `shared-imports: lib/game.ts: shared code imports features/game/hooks/use-game.ts ${fix("features/game")}`,
+    ]);
+    expect(lintShared({ routes: flatRoutes, sources: gameImport })).toEqual([]);
+  });
+
+  test("leaves a package that is not a React Router app alone", () => {
+    expect(lintShared({ reactRouter: false, sources: gameImport })).toEqual([]);
+  });
+
+  test("follows featuresDir", () => {
+    expect(
+      lintShared({
+        settings: { featuresDir: "modules" },
+        sources: {
+          "lib/game.ts": `import { useGame } from "../modules/game/hooks/use-game";\nimport { x } from "../features/x/lib/x";\n`,
+          "modules/game/hooks/use-game.ts": EMPTY_MODULE,
+          "features/x/lib/x.ts": EMPTY_MODULE,
+        },
+      }),
+    ).toEqual([`shared-imports: lib/game.ts: shared code imports modules/game/hooks/use-game.ts ${fix("modules/game")}`]);
+  });
+});
+
+describe("react-router-file-prefix", () => {
+  /** Lints `apps/web` with only react-router-file-prefix on; returns its messages. */
+  function lintPrefix({ settings, routes, files = [], reactRouter = true }: Project): string[] {
+    const tree: Record<string, string> = {};
+    if (reactRouter) tree["apps/web/react-router.config.ts"] = 'export default { appDirectory: "src" };\n';
+    if (routes !== undefined) tree["apps/web/src/routes.ts"] = routes;
+    for (const file of files) tree[`apps/web/src/${file}`] = EMPTY_MODULE;
+    const structure = settings ? { "react-router": settings } : undefined;
+    return lintFixture({ files: tree, structure, rules: ["react-router-file-prefix"] }).map((line) =>
+      line.replace(/^react-router-file-prefix: /, ""),
+    );
+  }
+
+  test("passes files named after a feature they sit in: singular, `.` separator, hooks after use-, nested features", () => {
+    expect(
+      lintPrefix({
+        routes: `${ROUTES_IMPORT}export default [
+          route("g", "features/game/pages/room-page.tsx"),
+          route("p", "features/billing/features/pricing/pages/pricing-page.tsx"),
+        ];`,
+        files: [
+          "features/game/pages/room-page.tsx",
+          "features/game/components/game-card.tsx",
+          "features/game/components/game.tsx",
+          "features/game/lib/game.types.ts",
+          "features/game/hooks/use-game-room.ts",
+          "features/games/lib/game-score.ts",
+          "features/categories/lib/category-tree.ts",
+          "features/billing/features/pricing/lib/pricing-table.ts",
+          "features/billing/features/pricing/lib/billing-plans.ts",
+          "features/quiz/question-types/hex/hex-display.tsx",
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  test("reports a file not named after its feature, and names the nearest feature, use- first for a hook", () => {
+    expect(
+      lintPrefix({
+        routes: `${ROUTES_IMPORT}export default [route("p", "features/billing/features/pricing/pages/pricing-page.tsx")];`,
+        files: [
+          "features/admin/components/profile-section.tsx",
+          "features/admin/hooks/use-batch-recipes.ts",
+          "features/admin/types.ts",
+          "features/billing/features/pricing/lib/plans.ts",
+        ],
+      }),
+    ).toEqual(
+      [
+        "features/admin/components/profile-section.tsx: the name does not start with its feature → rename it admin-…",
+        "features/admin/hooks/use-batch-recipes.ts: the name does not start with its feature → rename it use-admin-…",
+        "features/admin/types.ts: the name does not start with its feature → rename it admin-…",
+        "features/billing/features/pricing/lib/plans.ts: the name does not start with its feature → rename it pricing-…",
+      ].sort(),
+    );
+  });
+
+  test("names a file after the folders down to the first layer folder; a fix names only a feature", () => {
+    expect(
+      lintPrefix({
+        routes: `${ROUTES_IMPORT}export default [route("s", "features/admin/structure/pages/structure-list-page.tsx")];`,
+        files: [
+          "features/admin/structure/pages/structure-list-page.tsx",
+          "features/admin/structure/components/structure-table.tsx",
+          "features/admin/structure/components/dialog-structure-create.tsx",
+          "features/game/components/card/card-image.tsx",
+          "features/game/components/card/game-card-image.tsx",
+          "features/auth/schemas/login.schema.ts",
+        ],
+      }),
+    ).toEqual(
+      [
+        "features/admin/structure/components/dialog-structure-create.tsx: the name does not start with its feature → rename it structure-…",
+        "features/game/components/card/card-image.tsx: the name does not start with its feature → rename it game-…",
+        "features/auth/schemas/login.schema.ts: the name does not start with its feature → rename it auth-…",
+      ].sort(),
+    );
+  });
+
+  test("a folder right after features/ is a feature, even named like a layer or not in kebab-case", () => {
+    expect(
+      lintPrefix({
+        routes: ROUTES_IMPORT,
+        files: [
+          "features/pages/components/pages-text-article.tsx",
+          "features/_agent/lib/agent-code-gen.ts",
+          "features/_agent/config.ts",
+        ],
+      }),
+    ).toEqual(["features/_agent/config.ts: the name does not start with its feature → rename it agent-…"]);
+  });
+
+  test("leaves route modules, tests, index files, files loose in features/ and the case of a name to other rules", () => {
+    expect(
+      lintPrefix({
+        routes: `${ROUTES_IMPORT}export default [route("r", "features/game/pages/room-page.tsx"), route("x", "features/game/lib/robots.ts")];`,
+        files: [
+          "features/game/pages/room-page.tsx",
+          "features/game/lib/robots.ts",
+          "features/game/components/card.test.tsx",
+          "features/game/lib/index.ts",
+          "features/helpers.ts",
+          "features/game/components/GameCard.tsx",
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  test("skips the sharedFeatures, as react-router-feature-cycles does", () => {
+    const files = ["features/common/utils/plan-tone.ts", "features/layout/hooks/use-breadcrumbs.ts", "features/game/lib/score.ts"];
+    expect(lintPrefix({ routes: ROUTES_IMPORT, files })).toEqual([
+      "features/game/lib/score.ts: the name does not start with its feature → rename it game-…",
+    ]);
+    expect(lintPrefix({ routes: ROUTES_IMPORT, files, settings: { sharedFeatures: [] } })).toEqual(
+      [
+        "features/common/utils/plan-tone.ts: the name does not start with its feature → rename it common-…",
+        "features/layout/hooks/use-breadcrumbs.ts: the name does not start with its feature → rename it use-layout-…",
+        "features/game/lib/score.ts: the name does not start with its feature → rename it game-…",
+      ].sort(),
+    );
+  });
+
+  test("mode flat: a sub-folder that holds route modules is a feature", () => {
+    expect(
+      lintPrefix({
+        settings: { mode: "flat" },
+        routes: `${ROUTES_IMPORT}export default [route("pricing", "features/billing/pricing/pricing-page.tsx")];`,
+        files: [
+          "features/billing/pricing/pricing-page.tsx",
+          "features/billing/pricing/components/pricing-card.tsx",
+          "features/billing/pricing/components/card.tsx",
+          "features/billing/common/billing-promo.ts",
+          "features/billing/common/promo.ts",
+        ],
+      }),
+    ).toEqual(
+      [
+        "features/billing/pricing/components/card.tsx: the name does not start with its feature → rename it pricing-…",
+        "features/billing/common/promo.ts: the name does not start with its feature → rename it billing-…",
+      ].sort(),
+    );
+  });
+
+  test("follows featuresDir, routeFolder and nonRouteFolders", () => {
+    expect(
+      lintPrefix({
+        settings: { featuresDir: "modules", routeFolder: "routes", nonRouteFolders: ["ui"] },
+        routes: `${ROUTES_IMPORT}export default [route("a", "modules/app/routes/app-page.tsx")];`,
+        files: [
+          "modules/app/routes/app-page.tsx",
+          "modules/app/routes/helper.ts",
+          "modules/app/ui/widget/widget-icon.tsx",
+          "modules/app/components/components-list.tsx",
+          "features/app/lib/helper.ts",
+        ],
+      }),
+    ).toEqual(
+      [
+        "modules/app/routes/helper.ts: the name does not start with its feature → rename it app-…",
+        "modules/app/ui/widget/widget-icon.tsx: the name does not start with its feature → rename it app-…",
+      ].sort(),
+    );
+  });
+
+  test("stays silent without a routes file: it cannot tell route modules apart", () => {
+    expect(lintPrefix({ files: ["features/game/components/card.tsx"] })).toEqual([]);
+  });
+
+  test("stays silent on file-system routes: it cannot tell route modules apart", () => {
+    expect(
+      lintPrefix({
+        routes: `import { flatRoutes } from "@react-router/fs-routes";\nexport default flatRoutes();\n`,
+        files: ["features/game/components/card.tsx"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("leaves a package that is not a React Router app alone", () => {
+    expect(lintPrefix({ reactRouter: false, files: ["features/game/components/card.tsx"] })).toEqual([]);
+  });
+});
+
+describe("react-router-feature-cycles", () => {
+  // Inline comments and a trailing comma, as real tsconfig files carry them.
+  const TSCONFIG = `{
+    "compilerOptions": {
+      // every feature imports the others through @/
+      "paths": { "@/*": ["./src/*"] },
+    },
+  }`;
+
+  /** Lints `apps/web` with this rule alone; `sources` are files under `apps/web/src` with their text. */
+  function lintCycles(sources: Record<string, string>, settings?: Record<string, unknown>, reactRouter = true): string[] {
+    const tree: Record<string, string> = { "apps/web/tsconfig.json": TSCONFIG, "apps/web/src/routes.ts": ROUTES_IMPORT };
+    if (reactRouter) tree["apps/web/react-router.config.ts"] = 'export default { appDirectory: "src" };\n';
+    for (const [file, text] of Object.entries(sources)) tree[`apps/web/src/${file}`] = text;
+    return lintFixture({
+      files: tree,
+      structure: settings ? { "react-router": settings } : undefined,
+      rules: ["react-router-feature-cycles"],
+    });
+  }
+
+  const CRATE_DOWNLOAD = {
+    "features/crate/utils/crate-queries.ts":
+      'import { downloadState } from "../../download/utils/download-state";\nexport const crateQueries = downloadState;\n',
+    "features/crate/components/crate-list.tsx":
+      'import { useDownload } from "@/features/download/hooks/use-download";\nexport const CrateList = () => useDownload();\n',
+    "features/crate/pages/crate-page.tsx":
+      'import { downloadState } from "@/features/download/utils/download-state";\nexport default () => downloadState;\n',
+    "features/download/utils/download-state.ts": "export const downloadState = 1;\n",
+    "features/download/hooks/use-download.ts": "export const useDownload = () => 1;\n",
+    // Two imports of one file count once; a dynamic import counts.
+    "features/download/utils/download-cache.ts": [
+      'import type { CrateQueries } from "@/features/crate/utils/crate-queries";',
+      'import { crateQueries } from "@/features/crate/utils/crate-queries";',
+      'export const list = () => import("@/features/crate/components/crate-list");',
+      "export type Cache = CrateQueries | typeof crateQueries;",
+      "",
+    ].join("\n"),
+  };
+
+  test("reports the side with fewer imports, once per file it imports, with the other side's count", () => {
+    expect(lintCycles(CRATE_DOWNLOAD)).toEqual(
+      [
+        "react-router-feature-cycles: features/download/utils/download-cache.ts: imports features/crate, which imports features/download (3 imports) → move utils/crate-queries.ts out of crate (to lib/ or download), or merge the two features",
+        "react-router-feature-cycles: features/download/utils/download-cache.ts: imports features/crate, which imports features/download (3 imports) → move components/crate-list.tsx out of crate (to lib/ or download), or merge the two features",
+      ].sort(),
+    );
+  });
+
+  test("passes imports one way, inside a feature, and from or to tests", () => {
+    expect(
+      lintCycles({
+        "features/game/game-board.ts": 'import { score } from "@/features/score/score-total";\nexport const board = score;\n',
+        "features/game/game-board.test.ts": 'import { score } from "@/features/score/score-total";\nexport const cases = [score];\n',
+        "features/score/score-total.ts": "export const score = 1;\n",
+        "features/score/score-total.test.ts": 'import { board } from "@/features/game/game-board";\n',
+        "features/score/score-fixture.ts":
+          'import { cases } from "@/features/game/game-board.test";\nexport const fixture = cases;\n',
+        "features/billing/billing-plan.ts": 'import { price } from "./features/pricing/pricing-price";\nexport const plan = price;\n',
+        "features/billing/features/pricing/pricing-price.ts":
+          'import { plan } from "../../billing-plan";\nexport const price = plan;\n',
+      }),
+    ).toEqual([]);
+  });
+
+  test("on a tie, reports the side of the feature whose name sorts first", () => {
+    expect(
+      lintCycles({
+        "features/beta/beta-y.ts": 'import { a } from "../alpha/alpha-x";\nexport const b = a;\n',
+        "features/alpha/alpha-x.ts": 'import { b } from "@/features/beta/beta-y";\nexport const a = b;\n',
+      }),
+    ).toEqual([
+      "react-router-feature-cycles: features/alpha/alpha-x.ts: imports features/beta, which imports features/alpha (1 import) → move beta-y.ts out of beta (to lib/ or alpha), or merge the two features",
+    ]);
+  });
+
+  test("reports an import no import node holds, a type-level import(), on the file", () => {
+    expect(
+      lintCycles({
+        "features/beta/beta-y.ts": 'import { a } from "../alpha/alpha-x";\nexport const b = a;\n',
+        "features/alpha/alpha-x.ts": 'export type B = typeof import("@/features/beta/beta-y");\nexport const a = 1;\n',
+      }),
+    ).toEqual([
+      "react-router-feature-cycles: features/alpha/alpha-x.ts: imports features/beta, which imports features/alpha (1 import) → move beta-y.ts out of beta (to lib/ or alpha), or merge the two features",
+    ]);
+  });
+
+  const LAYOUT_ORGANIZATION = {
+    "features/layout/components/layout-header.tsx":
+      'import { Menu } from "@/features/organization/organization-menu";\nexport const Header = Menu;\n',
+    "features/organization/organization-menu.tsx":
+      'import { Header } from "@/features/layout/components/layout-header";\nexport const Menu = Header;\n',
+  };
+
+  test("exempts the shared features, named by sharedFeatures", () => {
+    expect(lintCycles(LAYOUT_ORGANIZATION)).toEqual([]);
+    expect(lintCycles(LAYOUT_ORGANIZATION, { sharedFeatures: ["common"] })).toEqual([
+      "react-router-feature-cycles: features/layout/components/layout-header.tsx: imports features/organization, which imports features/layout (1 import) → move organization-menu.tsx out of organization (to lib/ or layout), or merge the two features",
+    ]);
+  });
+
+  test("follows featuresDir", () => {
+    const modules = Object.fromEntries(
+      Object.entries(LAYOUT_ORGANIZATION).map(([file, text]) => [
+        file.replace(/^features/, "modules"),
+        text.replaceAll("@/features", "@/modules"),
+      ]),
+    );
+    expect(lintCycles(modules, { featuresDir: "modules", sharedFeatures: [] })).toEqual([
+      "react-router-feature-cycles: modules/layout/components/layout-header.tsx: imports modules/organization, which imports modules/layout (1 import) → move organization-menu.tsx out of organization (to lib/ or layout), or merge the two features",
+    ]);
+  });
+
+  test("leaves alone what is not a React Router app", () => {
+    expect(lintCycles(CRATE_DOWNLOAD, undefined, false)).toEqual([]);
+  });
+
+  test("fails loudly on an invalid sharedFeatures", () => {
+    expect(() => lintCycles(LAYOUT_ORGANIZATION, { sharedFeatures: "layout" })).toThrow(
+      /structure settings\["react-router"\]: sharedFeatures must be a list of names/,
+    );
+  });
+});

@@ -209,6 +209,33 @@ const routesByFile = new Map<string, { probed: ReadonlyMap<string, number | null
 const isFresh = (probed: ReadonlyMap<string, number | null>): boolean =>
   [...probed].every(([path, mtime]) => mtimeOf(path) === mtime);
 
+const aliasesByRoot = new Map<string, { probed: ReadonlyMap<string, number | null>; aliases: PathAliases }>();
+
+/** The `paths` aliases of the app's `tsconfig.json`. Cached until one of the files they come from changes. */
+function aliasesOf(app: RouterApp): PathAliases {
+  const cached = aliasesByRoot.get(app.root);
+  if (cached && isFresh(cached.probed)) return cached.aliases;
+  const aliases = readPathAliases(join(app.root, "tsconfig.json"));
+  aliasesByRoot.set(app.root, { probed: new Map(aliases.files.map((file) => [file, mtimeOf(file)])), aliases });
+  return aliases;
+}
+
+/**
+ * The source file an import of `from` leads to, as the bundler resolves it: a relative specifier, or an
+ * alias of the app's `tsconfig.json` `compilerOptions.paths`. Null for a package, an import nothing
+ * resolves, or a file outside the app's source folder.
+ */
+export function resolveImportPath(app: RouterApp, from: string, specifier: string): string | null {
+  const targets = RELATIVE_SPECIFIER.test(specifier) ? [resolve(dirname(from), specifier)] : aliasTargets(aliasesOf(app), specifier);
+  if (targets === null) return null;
+  const probed = new Map<string, number | null>();
+  for (const target of targets) {
+    const file = resolveFile(app, target, probed);
+    if (file !== null) return file;
+  }
+  return null;
+}
+
 /**
  * What the app's route config declares, ignoring commented-out routes: `routesFile` plus the files it
  * imports. Cached until one of them changes, appears or goes away.

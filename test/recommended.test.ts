@@ -8,9 +8,11 @@ const RECOMMENDED_JSON = join(import.meta.dir, "../recommended.json");
 const ELYSIA_PACKAGE = JSON.stringify({ dependencies: { elysia: "1" } });
 
 describe("recommended", () => {
-  test("recommended.json and configs.recommended turn on the same rules, every one but *-file-prefix", () => {
+  test("recommended.json and configs.recommended turn on the same rules, every one but the opt-in ones", () => {
     const json = JSON.parse(readFileSync(RECOMMENDED_JSON, "utf8")) as { rules: Record<string, string> };
-    const ruleNames = Object.keys(plugin.rules).filter((rule) => !rule.endsWith("-file-prefix"));
+    const ruleNames = Object.keys(plugin.rules).filter(
+      (rule) => !rule.endsWith("-file-prefix") && rule !== "react-router-feature-cycles",
+    );
     expect(json.rules).toEqual(plugin.configs.recommended.rules);
     expect([...RECOMMENDED].sort()).toEqual(ruleNames.sort());
     expect(plugin.configs.recommended.plugins.structure).toBe(plugin);

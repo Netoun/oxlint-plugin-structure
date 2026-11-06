@@ -13,6 +13,11 @@ export type ReactRouterSettings = {
   leafSuffixes: readonly string[];
   /** Suffixes of a route module with child routes. */
   layoutSuffixes: readonly string[];
+  /**
+   * Features every other one may use: `react-router-feature-cycles` ignores imports to and from them,
+   * `react-router-file-prefix` does not ask their files to start with their name.
+   */
+  sharedFeatures: readonly string[];
 };
 
 export const DEFAULT_SETTINGS: ReactRouterSettings = {
@@ -22,6 +27,7 @@ export const DEFAULT_SETTINGS: ReactRouterSettings = {
   nonRouteFolders: ["components", "hooks", "lib", "utils", "store", "stores", "assets", "data", "forms"],
   leafSuffixes: ["page", "redirect"],
   layoutSuffixes: ["layout"],
+  sharedFeatures: ["layout", "common", "shared"],
 };
 
 /** Reads and validates the settings; a wrong setting throws, so a typo never passes silently. */

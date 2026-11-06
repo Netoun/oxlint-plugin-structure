@@ -14,7 +14,10 @@ import {
   type Visitor,
 } from "../eslint.js";
 import { appPath, findRouterApp, readRoutes, routesFileOf, type RouterApp, type RoutesIndex } from "./app.js";
+import { filePrefix } from "./file-prefix.js";
+import featureCycles from "./feature-cycles.js";
 import { readSettings, type ReactRouterSettings } from "./settings.js";
+import { sharedImports } from "./shared-imports.js";
 
 type RouteHelper = "route" | "layout" | "index";
 /** A `route()`/`layout()`/`index()` call: the route module it names, and the config file it is written in. */
@@ -170,7 +173,7 @@ function routesFileRule(
  * it (a route config file is neither a route module nor a loose file). `check` returns one problem or
  * null; it also gets null `routes` when the app has no routes file.
  */
-function featureFileRule(
+export function featureFileRule(
   context: RuleContext,
   check: (
     file: string,
@@ -293,7 +296,7 @@ const noLooseFiles: Rule = {
 const KEBAB_NAME = /^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)*$/;
 
 /** `GameCard.test.tsx` → `game-card.test.tsx`; null when a part has nothing usable left (`$.ts`). */
-function kebabName(name: string): string | null {
+export function kebabName(name: string): string | null {
   const parts = name.split(".").map((part) =>
     part
       .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
@@ -393,4 +396,7 @@ export const reactRouterRules: Record<string, Rule> = {
   "react-router-no-loose-files": noLooseFiles,
   "react-router-file-case": fileCase,
   "react-router-folder-contents": folderContents,
+  "react-router-shared-imports": sharedImports,
+  "react-router-file-prefix": filePrefix,
+  "react-router-feature-cycles": featureCycles,
 };

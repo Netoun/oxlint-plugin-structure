@@ -52,11 +52,13 @@ bun add -d @netoun/oxlint-plugin-structure
 }
 ```
 
-`recommended.json` turns on every rule except `elysia-file-prefix` and `nestjs-file-prefix`, which
-check every file of a module and run noisy on existing code: add them to your `rules` for a new
-project or once the others are green. Each rule stays silent outside its stack, so the preset is safe in
-any repo, monorepos included. The `extends` path is relative to your config file: point it at the
-`node_modules` the plugin is installed in. A rule set in your own `rules` wins over the preset.
+`recommended.json` turns on every rule except the opt-in ones: `react-router-file-prefix`,
+`elysia-file-prefix` and `nestjs-file-prefix`, which check every file of a feature or module and run
+noisy on existing code, and `react-router-feature-cycles`, whose fix moves code between features. Add
+them to your `rules` for a new project or once the others are green. Each rule stays silent outside its
+stack, so the preset is safe in any repo, monorepos included. The `extends` path is relative to your
+config file: point it at the `node_modules` the plugin is installed in. A rule set in your own `rules`
+wins over the preset.
 
 ESLint flat config:
 
@@ -89,11 +91,31 @@ folder, through a relative path (`./auth-routes`, a folder's `index.ts`) or an a
 | `react-router-no-loose-files`         | nothing else lives where route modules live, nor loose at a feature root |
 | `react-router-file-case`              | every file under `features/` is kebab-case: `game-card.tsx`, not `GameCard.tsx` |
 | `react-router-folder-contents`        | `hooks/` holds `use-*` files, `components/` holds `.tsx`, `lib/` and `utils/` hold no component |
+| `react-router-shared-imports`         | shared code (outside `features/`: `components/`, `lib/`, `hooks/`…) imports no file of a feature, type imports and tests included; route modules, route config files, `root.tsx`, `entry.client.tsx` and `entry.server.tsx` are not shared code. Follows relative imports and `tsconfig.json` `paths` aliases |
+| `react-router-file-prefix`            | every other file of a feature starts with it: `game-card.tsx`, `hooks/use-game-room.ts` (noisy, opt-in) |
+| `react-router-feature-cycles`         | two features never import each other: the side with fewer imports is reported (opt-in) |
+
+`react-router-file-prefix` accepts any folder from the feature down to the first layer folder
+(`nonRouteFolders`, and `pages/` in mode `pages`), or its singular, then `-` or `.`; a hook drops `use-`
+first. Its fix names the nearest feature: a folder of `features/`, or one that holds route modules. It
+skips route modules, tests, `index.*` files and the `sharedFeatures`.
 
 Resource routes (`.ts`, no component) skip the suffix and prefix rules. The first three rules report
 on the path string, in the config file that declares it; the others report on the offending file. A
 route config file is neither a route module nor a loose file, and `react-router-file-case` still applies
 to it.
+
+A feature may import another; two features that import each other can neither move nor be read alone.
+`react-router-feature-cycles` counts the imports each way, as distinct (file, imported file) pairs read
+through relative paths and `paths` aliases, tests left out on both sides. It reports the side with fewer
+(on a tie, the feature whose name sorts first), once per file it imports from the other:
+
+```text
+src/features/download/utils/download-cache.ts:8:8: error structure(react-router-feature-cycles): features/download/utils/download-cache.ts: imports features/crate, which imports features/download (5 imports) → move utils/crate-queries.ts out of crate (to lib/ or download), or merge the two features
+```
+
+The `sharedFeatures` are exempt both ways. The rule reads the files of the two features involved, cached
+until they change.
 
 ### Modes
 
@@ -129,6 +151,7 @@ turns a rule off silently.
 | `nonRouteFolders` | `components hooks lib utils store stores assets data forms` |
 | `leafSuffixes`    | `["page", "redirect"]`                              |
 | `layoutSuffixes`  | `["layout"]`                                        |
+| `sharedFeatures`  | `layout common shared`: features every other may import (`react-router-feature-cycles`), named after what they hold (`react-router-file-prefix`) |
 
 ### Limits
 
@@ -201,11 +224,12 @@ after what they hold, so it has no contract rule and skips those folders.
 
 A repo grown without the convention starts red: each hit is a file to rename or move.
 
-1. Extend `recommended.json` as in [Install](#install): it leaves `*-file-prefix` out.
+1. Extend `recommended.json` as in [Install](#install): it leaves the opt-in rules out.
 2. Run `oxlint .` and fix what it reports, one stack at a time. The settings name your folders and
    roles (`modulesDir`, `roles`, `featuresDir`…); there is no ignore list for files.
-3. When the rest is green, turn on `elysia-file-prefix` or `nestjs-file-prefix`: it checks every file
-   of a module and reports the most on existing code.
+3. When the rest is green, turn on `react-router-file-prefix`, `elysia-file-prefix` or
+   `nestjs-file-prefix`: each checks every file of a feature or module and reports the most on
+   existing code.
 4. A new project can turn all of them on from the start: the apps in [`examples/`](./examples) pass
    `*-file-prefix` too.
 

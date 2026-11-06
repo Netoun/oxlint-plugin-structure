@@ -52,6 +52,7 @@ type Case = {
 const CASES: Case[] = [
   {
     stack: "react-router",
+    extraRule: "react-router-file-prefix",
     rename: ["src/features/game/pages/game-room-page.tsx", "src/features/game/pages/room-page.tsx"],
     rule: "react-router-feature-prefix",
     message: "features/game/pages/room-page.tsx: the name does not start with its feature → rename it game-…",

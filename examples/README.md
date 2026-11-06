@@ -16,5 +16,5 @@ bunx oxlint .
 ```
 
 Rename a file and run it again to read the message. `test/examples.test.ts` pins both ends: each
-example passes its config (and `*-file-prefix` for the module stacks), and one renamed file gives
+example passes its config (and its stack's `*-file-prefix`), and one renamed file gives
 the exact message the main README shows.
