@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "types": ["node"], "rootDir": "src" },
+  "compilerOptions": { "types": ["node"], "rootDir": "src", "removeComments": true },
   "include": ["src"]
 }
