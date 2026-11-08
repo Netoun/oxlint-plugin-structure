@@ -19,8 +19,8 @@ type Plugin = {
 };
 
 /**
- * Every rule but the opt-in ones: the noisy `*-file-prefix` rules and `react-router-feature-cycles`, whose
- * fix moves code between features. Safe to turn on in any repo: each rule finds its stack
+ * Every rule but the opt-in ones: the noisy `*-file-prefix` rules, and `react-router-feature-cycles` and
+ * `nestjs-module-cycles`, whose fix moves code between features or modules. Safe to turn on in any repo: each rule finds its stack
  * from the linted file and stays silent elsewhere. `recommended.json` lists the same rules for oxlint.
  */
 export const RECOMMENDED: readonly string[] = [

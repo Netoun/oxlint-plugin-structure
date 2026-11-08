@@ -54,11 +54,11 @@ bun add -d @netoun/oxlint-plugin-structure
 
 `recommended.json` turns on every rule except the opt-in ones: `react-router-file-prefix`,
 `elysia-file-prefix` and `nestjs-file-prefix`, which check every file of a feature or module and run
-noisy on existing code, and `react-router-feature-cycles`, whose fix moves code between features. Add
-them to your `rules` for a new project or once the others are green. Each rule stays silent outside its
-stack, so the preset is safe in any repo, monorepos included. The `extends` path is relative to your
-config file: point it at the `node_modules` the plugin is installed in. A rule set in your own `rules`
-wins over the preset.
+noisy on existing code, and `react-router-feature-cycles` and `nestjs-module-cycles`, whose fix moves code
+between features or modules. Add them to your `rules` for a new project or once the others are green.
+Each rule stays silent outside its stack, so the preset is safe in any repo, monorepos included. The
+`extends` path is relative to your config file: point it at the `node_modules` the plugin is installed in.
+A rule set in your own `rules` wins over the preset.
 
 ESLint flat config:
 
@@ -207,9 +207,25 @@ src/modules/billing/invoicing.service.ts:1:1: error structure(nestjs-role-prefix
 | `nestjs-entity-location`   | a module or sub-feature keeps one entity at its root; several, or one beside an `entities/` folder, move to `entities/`. Only a file that declares one (`@Entity(`, `@Embeddable(`) counts: a root `auth.entity.ts` that re-exports `entities/` passes |
 | `nestjs-class-name`        | a role file's exported class is named after it: `browsing-cover-link.service.ts` holds `BrowsingCoverLinkService`, `posts.service.ts` may hold `PostService`, an entity drops the role (`comment.entity.ts` holds `Comment`). Factories, contracts and files that declare no class are skipped |
 | `nestjs-role-vocabulary`   | the segment between a file's last two dots is a role; a topic takes a hyphen: `auth.cookie-domain.ts` → `auth-cookie-domain.ts`, `auth.session-guard.ts` → `auth-session.guard.ts`. Skips test files. NestJS only: Elysia apps write dotted topics on purpose |
+| `nestjs-module-cycles`     | two modules never import each other: the side with fewer imports is reported (opt-in) |
 
 NestJS also allows `<module>.contract.ts` at the module root, and names `entities/` and `utils/` files
 after what they hold, so it has no contract rule and skips those folders.
+
+A module may import another; two modules that import each other can neither move nor be read alone.
+`nestjs-module-cycles` counts the imports each way, as distinct (file, imported file) pairs read through
+relative paths and `paths` aliases, tests left out on both sides. It reports the side with fewer (on a tie,
+the module whose name sorts first), once per file it imports from the other:
+
+```text
+src/modules/billing/billing-download.service.ts:3:8: error structure(nestjs-module-cycles): modules/billing/billing-download.service.ts: imports modules/media, which imports modules/billing (3 imports) → move media-access.service.ts out of media (to a module both import, or to billing), or merge the two modules
+```
+
+The rule reads the files of the two modules involved, cached until they change. It sees pairs only: a loop
+through three modules (billing → media → crate → billing) has no pair to report, and fixing every pair
+can leave one standing. A bare import that relies on `baseUrl` alone (`src/modules/…`) is not read. A
+file that only wires modules together, such as a CLI entry that imports `db.module.ts`, is reported
+too: the fix there is to move the entry, not the module.
 
 ### Settings
 

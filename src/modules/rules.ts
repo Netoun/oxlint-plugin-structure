@@ -5,6 +5,7 @@ import { nearestPackage } from "../package.js";
 import { readSection } from "../settings.js";
 import { ENTITY_LOCATION_DESCRIPTION, entityLocation } from "./entity-location.js";
 import { classNameRule } from "./class-name.js";
+import { moduleCyclesRule } from "./module-cycles.js";
 import { roleVocabulary } from "./role-vocabulary.js";
 
 /**
@@ -181,4 +182,5 @@ export const nestjsRules: Record<string, Rule> = {
   "nestjs-entity-location": moduleFileRule(nestjs, ENTITY_LOCATION_DESCRIPTION, entityLocation),
   "nestjs-class-name": classNameRule(nestjs),
   "nestjs-role-vocabulary": moduleFileRule(nestjs, roleVocabulary.description, roleVocabulary.check),
+  "nestjs-module-cycles": moduleCyclesRule(nestjs),
 };
