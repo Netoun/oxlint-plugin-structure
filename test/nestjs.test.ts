@@ -388,3 +388,116 @@ describe("nestjs-role-vocabulary", () => {
     );
   });
 });
+
+describe("nestjs-module-cycles", () => {
+  // Inline comments and a trailing comma, as real tsconfig files carry them.
+  const TSCONFIG = `{
+    "compilerOptions": {
+      // modules import each other through @/
+      "paths": { "@/*": ["./src/*"] },
+    },
+  }`;
+
+  /** Lints `apps/api` with this rule alone; `sources` are files under `apps/api/src/modules` with their text. */
+  function lintCycles(sources: Record<string, string>, settings?: Record<string, unknown>, dependency = "@nestjs/core"): string[] {
+    const tree: Record<string, string> = {
+      "apps/api/package.json": JSON.stringify({ name: "api", dependencies: { [dependency]: "11.0.0" } }),
+      "apps/api/tsconfig.json": TSCONFIG,
+    };
+    for (const [file, text] of Object.entries(sources)) tree[`apps/api/src/modules/${file}`] = text;
+    return lintFixture({
+      files: tree,
+      structure: settings ? { nestjs: settings } : undefined,
+      rules: ["nestjs-module-cycles"],
+    });
+  }
+
+  const MEDIA_BILLING = {
+    "media/media.controller.ts":
+      'import { plan } from "../billing/utils/billing-plan";\nexport const controller = plan;\n',
+    "media/media-access.service.ts":
+      'import { Plan } from "@/modules/billing/billing.service";\nexport const access = (plan: Plan) => plan;\n',
+    "media/media-refusals.ts": 'export * from "../billing/billing-refusals";\n',
+    "billing/billing.service.ts": "export type Plan = string;\n",
+    "billing/billing-refusals.ts": "export const refusal = 1;\n",
+    "billing/utils/billing-plan.ts": "export const plan = 1;\n",
+    // Two imports of one file count once; a dynamic import counts.
+    "billing/billing-download.service.ts": [
+      'import type { Access } from "../media/media-access.service";',
+      'import { access } from "../media/media-access.service";',
+      'export const load = () => import("../media/media.controller.js");',
+      "export type Download = Access | typeof access;",
+      "",
+    ].join("\n"),
+  };
+
+  test("reports the side with fewer imports, once per file it imports, with the other side's count", () => {
+    expect(lintCycles(MEDIA_BILLING)).toEqual(
+      [
+        "nestjs-module-cycles: modules/billing/billing-download.service.ts: imports modules/media, which imports modules/billing (3 imports) → move media-access.service.ts out of media (to a module both import, or to billing), or merge the two modules",
+        "nestjs-module-cycles: modules/billing/billing-download.service.ts: imports modules/media, which imports modules/billing (3 imports) → move media.controller.ts out of media (to a module both import, or to billing), or merge the two modules",
+      ].sort(),
+    );
+  });
+
+  test("passes imports one way, inside a module, from or to tests, packages and the cross-module tests folder", () => {
+    expect(
+      lintCycles({
+        "game/game.service.ts": 'import { score } from "../score/score-total";\nexport const board = score;\n',
+        "game/game.service.spec.ts": 'import { score } from "../score/score-total";\nexport const cases = [score];\n',
+        "score/score-total.ts": "export const score = 1;\n",
+        "score/score-total.e2e-spec.ts": 'import { board } from "../game/game.service";\n',
+        "score/score-fixture.ts": 'import { cases } from "../game/game.service.spec";\nexport const fixture = cases;\n',
+        "billing/billing.service.ts": 'import { price } from "./pricing/pricing-price";\nimport { Injectable } from "@nestjs/common";\nexport const plan = [price, Injectable];\n',
+        "billing/pricing/pricing-price.ts": 'import { plan } from "../billing.service";\nexport const price = plan;\n',
+        "test/health.ts": 'import { score } from "../score/score-total";\nexport const health = score;\n',
+        "score/score-health.ts": 'import { health } from "../test/health";\nexport const check = health;\n',
+        "loose.ts": 'import { score } from "./score/score-total";\nexport const loose = score;\n',
+      }),
+    ).toEqual([]);
+  });
+
+  test("on a tie, reports the side of the module whose name sorts first", () => {
+    expect(
+      lintCycles({
+        "beta/beta-y.ts": 'import { a } from "../alpha/alpha-x";\nexport const b = a;\n',
+        "alpha/alpha-x.ts": 'import { b } from "@/modules/beta/beta-y";\nexport const a = b;\n',
+      }),
+    ).toEqual([
+      "nestjs-module-cycles: modules/alpha/alpha-x.ts: imports modules/beta, which imports modules/alpha (1 import) → move beta-y.ts out of beta (to a module both import, or to alpha), or merge the two modules",
+    ]);
+  });
+
+  test("reads an index file, a .js specifier and a type-level import()", () => {
+    expect(
+      lintCycles({
+        "beta/beta-y.ts": 'import { a } from "../alpha/alpha-x";\nexport const b = a;\n',
+        "beta/beta-z.ts": 'import { a } from "../alpha/alpha-x";\nexport const z = a;\n',
+        "beta/beta-w.ts": 'import { a } from "../alpha/alpha-x";\nexport const w = a;\n',
+        "beta/utils/index.ts": "export const util = 1;\n",
+        "alpha/alpha-x.ts": [
+          'export type B = typeof import("../beta/beta-y.js");',
+          'export { util } from "../beta/utils";',
+          "export const a = 1;",
+          "",
+        ].join("\n"),
+      }),
+    ).toEqual([
+      "nestjs-module-cycles: modules/alpha/alpha-x.ts: imports modules/beta, which imports modules/alpha (3 imports) → move beta-y.ts out of beta (to a module both import, or to alpha), or merge the two modules",
+      "nestjs-module-cycles: modules/alpha/alpha-x.ts: imports modules/beta, which imports modules/alpha (3 imports) → move utils/index.ts out of beta (to a module both import, or to alpha), or merge the two modules",
+    ].sort());
+  });
+
+  test("follows modulesDir and testsFolder", () => {
+    const files = {
+      "alpha/alpha-x.ts": 'import { b } from "../beta/beta-y";\nexport const a = b;\n',
+      "beta/beta-y.ts": 'import { a } from "../alpha/alpha-x";\nexport const b = a;\n',
+    };
+    expect(lintCycles(files, { testsFolder: "alpha" })).toEqual([]);
+    expect(lintCycles(files, { modulesDir: "src/features" })).toEqual([]);
+  });
+
+  test("leaves a package of another framework alone", () => {
+    expect(lintCycles(MEDIA_BILLING, undefined, "elysia")).toEqual([]);
+  });
+});

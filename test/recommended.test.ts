@@ -11,7 +11,7 @@ describe("recommended", () => {
   test("recommended.json and configs.recommended turn on the same rules, every one but the opt-in ones", () => {
     const json = JSON.parse(readFileSync(RECOMMENDED_JSON, "utf8")) as { rules: Record<string, string> };
     const ruleNames = Object.keys(plugin.rules).filter(
-      (rule) => !rule.endsWith("-file-prefix") && rule !== "react-router-feature-cycles",
+      (rule) => !rule.endsWith("-file-prefix") && !rule.endsWith("-cycles"),
     );
     expect(json.rules).toEqual(plugin.configs.recommended.rules);
     expect([...RECOMMENDED].sort()).toEqual(ruleNames.sort());
