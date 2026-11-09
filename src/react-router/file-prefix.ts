@@ -12,14 +12,28 @@ const singular = (name: string) => name.replace(/ies$/, "y").replace(/s$/, "");
 
 const INDEX = /^index\.[cm]?[jt]sx?$/;
 
-/** Folders that hold route modules: `features/game` for `features/game/pages/game-page.tsx` (mode pages). */
-function routedFolders(routes: RoutesIndex, settings: ReactRouterSettings): Set<string> {
-  return new Set(
-    [...routes.files].map((route) => {
-      const dir = dirname(route);
-      return settings.mode === "pages" && basename(dir) === settings.routeFolder ? dirname(dir) : dir;
-    }),
-  );
+/** Per route index, per mode and route folder: the folders that hold route modules. */
+const routedByIndex = new WeakMap<RoutesIndex, Map<string, ReadonlySet<string>>>();
+
+/**
+ * Folders that hold route modules: `features/game` for `features/game/pages/game-page.tsx` (mode pages).
+ * Computed once per route index, which is replaced when the route config changes, not once per file.
+ */
+function routedFolders(routes: RoutesIndex, settings: ReactRouterSettings): ReadonlySet<string> {
+  const key = `${settings.mode}/${settings.routeFolder}`;
+  let byKey = routedByIndex.get(routes);
+  if (byKey === undefined) routedByIndex.set(routes, (byKey = new Map()));
+  let folders = byKey.get(key);
+  if (folders === undefined) {
+    folders = new Set(
+      [...routes.files].map((route) => {
+        const dir = dirname(route);
+        return settings.mode === "pages" && basename(dir) === settings.routeFolder ? dirname(dir) : dir;
+      }),
+    );
+    byKey.set(key, folders);
+  }
+  return folders;
 }
 
 /**

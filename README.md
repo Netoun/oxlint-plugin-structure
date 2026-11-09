@@ -114,8 +114,10 @@ through relative paths and `paths` aliases, tests left out on both sides. It rep
 src/features/download/utils/download-cache.ts:8:8: error structure(react-router-feature-cycles): features/download/utils/download-cache.ts: imports features/crate, which imports features/download (5 imports) → move utils/crate-queries.ts out of crate (to lib/ or download), or merge the two features
 ```
 
-The `sharedFeatures` are exempt both ways. The rule reads the files of the two features involved, cached
-until they change.
+The `sharedFeatures` are exempt both ways. The rule reads the files of the two features involved once,
+then reads a file again when it is linted and has changed, when its folder changes (a file added,
+removed or saved through a rename) or when `tsconfig.json` changes. In an editor, a file of another
+feature edited in place by another tool counts once it is linted.
 
 ### Modes
 

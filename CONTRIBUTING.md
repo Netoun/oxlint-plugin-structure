@@ -28,6 +28,29 @@ A rule here is the convention itself, so it must earn its place on real code:
 
 The full checklist, and the invariants every rule keeps, are in [`AGENTS.md`](./AGENTS.md).
 
+## Performance
+
+```bash
+bun run bench                          # 100, 1k, 10k-file React Router, Elysia and NestJS trees
+bun run bench --rules                  # + each rule alone on the 10k trees: CPU time in the rule, fs calls per file
+bun run bench --repo ../some-app       # + a real repo, read-only
+bun bench/profile.ts --stack nestjs    # CPU profile of oxlint's Node process, the plugin's functions ranked
+
+# A change against main: build main's dist/ in a worktree, then
+bun run build && bun bench/compare.ts --baseline ../main/dist/index.js --rules [--repo ../some-app]
+```
+
+oxlint runs every JS rule on one Node thread, file after file, so per-file work adds up across the
+run. A rule reads what it needs from disk at most once per linted file (`perFile` in `src/memo.ts`
+shares it across rules), derives what it needs from the route index once per index rather than once
+per file, and only returns a visitor when it reports or reads the AST: a `Program` visitor makes
+oxlint hand the file's AST to JS.
+
+Compare builds with `bench/compare.ts`, which alternates them run by run: two benches run one after
+the other drift with the machine's load (3× on a busy laptop), enough to make an untouched rule look
+slower. Its `plugin JS CPU` column, the JS thread's time inside the rules, is the steadiest measure. A
+sandboxed shell can slow every `stat` several times: run the bench outside it.
+
 ## Pull requests
 
 - Title in conventional-commit form: `feat: nestjs module-entry rule`, `fix: …`, `docs: …`.

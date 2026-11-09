@@ -169,9 +169,10 @@ function routesFileRule(
 }
 
 /**
- * Visits files under `featuresDir` that the route config does not declare, and that are not part of
+ * Checks files under `featuresDir` that the route config does not declare, and that are not part of
  * it (a route config file is neither a route module nor a loose file). `check` returns one problem or
- * null; it also gets null `routes` when the app has no routes file.
+ * null; it also gets null `routes` when the app has no routes file. The check needs the path alone, so
+ * it runs in `create`: only a file with a problem asks oxlint for its AST, to report on `Program`.
  */
 export function featureFileRule(
   context: RuleContext,
@@ -187,13 +188,14 @@ export function featureFileRule(
   if (!app) return {};
   const file = appPath(app, context.filename);
   if (!file.startsWith(`${settings.featuresDir}/`) || isTest(file)) return {};
+  const routesFile = routesFileOf(app);
+  const routes = routesFile === null ? null : readRoutes(app, routesFile);
+  if (routes?.fileSystemRoutes || routes?.files.has(file) || routes?.configFiles.has(file)) return {};
+  const problem = check(file, routes, settings, app);
+  if (problem === null) return {};
   return {
     Program(node) {
-      const routesFile = routesFileOf(app);
-      const routes = routesFile === null ? null : readRoutes(app, routesFile);
-      if (routes?.fileSystemRoutes || routes?.files.has(file) || routes?.configFiles.has(file)) return;
-      const problem = check(file, routes, settings, app);
-      if (problem !== null) context.report({ node, message: `${file}: ${problem}` });
+      context.report({ node, message: `${file}: ${problem}` });
     },
   };
 }
@@ -266,6 +268,15 @@ const reservedSuffixes: Rule = {
     }),
 };
 
+const foldersByIndex = new WeakMap<RoutesIndex, ReadonlySet<string>>();
+
+/** The folders route modules sit in; computed once per route index (replaced when the config changes). */
+function routeFolders(routes: RoutesIndex): ReadonlySet<string> {
+  let folders = foldersByIndex.get(routes);
+  if (folders === undefined) foldersByIndex.set(routes, (folders = new Set([...routes.files].map((route) => dirname(route)))));
+  return folders;
+}
+
 const noLooseFiles: Rule = {
   meta: {
     type: "problem",
@@ -288,8 +299,7 @@ const noLooseFiles: Rule = {
         if (isInRouteFolder(dir, settings)) return `only route modules live in ${routeHome(settings)} → ${moveIt(settings)}`;
         return null;
       }
-      const routeFolders = new Set([...routes.files].map((route) => dirname(route)));
-      return routeFolders.has(dir) ? `only route modules live in ${routeHome(settings)} → ${moveIt(settings)}` : null;
+      return routeFolders(routes).has(dir) ? `only route modules live in ${routeHome(settings)} → ${moveIt(settings)}` : null;
     }),
 };
 
